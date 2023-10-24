@@ -37,6 +37,8 @@ export default class Member {
   supportsBreakouts: boolean;
   supportsInterpretation: boolean;
   supportLiveAnnotation: boolean;
+  canMoveToLobby: boolean;
+  canBeMovedToLobby: boolean;
   type: any;
   namespace = MEETINGS;
 
@@ -294,6 +296,8 @@ export default class Member {
         MemberUtil.isModeratorAssignmentProhibited(participant);
       this.processStatus(participant);
       this.processRoles(participant as ParticipantWithRoles);
+      this.canBeMovedToLobby = MemberUtil.canBeMovedToLobby(participant);
+      this.canMoveToLobby = MemberUtil.canMoveToLobby(participant);
       // must be done last
       this.isNotAdmitted = MemberUtil.isNotAdmitted(participant, this.isGuest, this.status);
     }

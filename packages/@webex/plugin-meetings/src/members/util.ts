@@ -201,6 +201,22 @@ const MembersUtil = {
     };
   },
 
+  getMoveMemberToLobbyRequestOptions: (memberId: string) => ({
+    moveToLobby: {
+      participantIds: [memberId],
+    },
+  }),
+
+  getMoveMemberToLobbyRequestParams: (options: {memberId: string; locusUrl: string}, body) => {
+    const uri = `${options.locusUrl}/${PARTICIPANT}/${options.memberId}/${CONTROLS}`;
+
+    return {
+      method: HTTP_VERBS.PATCH,
+      uri,
+      body,
+    };
+  },
+
   /**
    * @param {RoleAssignmentOptions} options
    * @returns {RoleAssignmentRequest} the request parameters (method, uri, body) needed to make a addMember request

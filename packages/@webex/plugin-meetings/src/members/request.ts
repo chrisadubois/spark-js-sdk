@@ -111,10 +111,9 @@ export default class MembersRequest extends StatelessWebexPlugin {
   }
 
   /**
-   * Sends a request to the DTMF endpoint to send tones
    * @param {Object} options
    * @param {String} options.locusUrl
-   * @param {String} options.memberId ID of PSTN user
+   * @param {String} options.memberId
    * @returns {Promise}
    */
   assignRolesMember(options: any) {
@@ -125,6 +124,22 @@ export default class MembersRequest extends StatelessWebexPlugin {
     }
 
     const requestParams = MembersUtil.getRoleAssignmentMemberRequestParams(options);
+
+    return this.locusDeltaRequest(requestParams);
+  }
+
+  // eslint-disable-next-line require-jsdoc
+  moveToLobbyMember(
+    options: {locusUrl: string; memberId: string},
+    body: {moveToLobby: {participantIds: string[]}}
+  ) {
+    if (!options || !options.locusUrl || !options.memberId) {
+      throw new ParameterError(
+        'memberId must be defined, and the associated locus url for this meeting object must be defined.'
+      );
+    }
+
+    const requestParams = MembersUtil.getMoveMemberToLobbyRequestParams(options, body);
 
     return this.locusDeltaRequest(requestParams);
   }

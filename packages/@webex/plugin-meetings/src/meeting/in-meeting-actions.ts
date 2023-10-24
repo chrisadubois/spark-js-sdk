@@ -13,6 +13,7 @@ interface IInMeetingActions {
   canAdmitParticipant?: boolean;
   canLock?: boolean;
   canUnlock?: boolean;
+  canMoveToLobby?: boolean;
   canSetMuteOnEntry?: boolean;
   canUnsetMuteOnEntry?: boolean;
   canSetDisallowUnmute?: boolean;
@@ -122,6 +123,8 @@ export default class InMeetingActions implements IInMeetingActions {
   canRaiseHand = null;
 
   canLowerAllHands = null;
+
+  canMoveToLobby = null;
 
   canLowerSomeoneElsesHand = null;
 
@@ -294,6 +297,7 @@ export default class InMeetingActions implements IInMeetingActions {
     supportHQV: this.supportHQV,
     supportHDV: this.supportHDV,
     canShareWhiteBoard: this.canShareWhiteBoard,
+    canMoveToLobby: this.canMoveToLobby,
   });
 
   /**
