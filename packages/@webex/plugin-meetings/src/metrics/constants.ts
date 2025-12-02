@@ -87,6 +87,8 @@ const BEHAVIORAL_METRICS = {
   VERIFY_REGISTRATION_ID_ERROR: 'js_sdk_verify_registrationId_error',
   JOIN_FORBIDDEN_ERROR: 'js_sdk_join_forbidden_error',
   MEDIA_ISSUE_DETECTED: 'js_sdk_media_issue_detected',
+  INSTANT_MEETING_SUCCESS: 'js_sdk_instant_meeting_success',
+  INSTANT_MEETING_FAILURE: 'js_sdk_instant_meeting_failure',
 };
 
 export {BEHAVIORAL_METRICS as default};

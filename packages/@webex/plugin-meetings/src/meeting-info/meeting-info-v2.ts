@@ -16,6 +16,8 @@ const CAPTCHA_ERROR_DEFAULT_MESSAGE =
   'Captcha required. Call fetchMeetingInfo() with captchaInfo argument';
 const ADHOC_MEETING_DEFAULT_ERROR =
   'Failed starting the adhoc meeting, Please contact support team ';
+const INSTANT_MEETING_DEFAULT_ERROR =
+  'Failed starting the instant meeting, Please contact support team ';
 const MEETING_IS_IN_PROGRESS_MESSAGE = 'Meeting is in progress';
 const STATIC_MEETING_LINK_ALREADY_EXISTS_MESSAGE = 'Static meeting link already exists';
 const FETCH_STATIC_MEETING_LINK = 'Meeting link does not exists for conversation';
@@ -82,6 +84,27 @@ export class MeetingInfoV2AdhocMeetingError extends Error {
   constructor(wbxAppApiErrorCode?: number, message: string = ADHOC_MEETING_DEFAULT_ERROR) {
     super(`${message}, code=${wbxAppApiErrorCode}`);
     this.name = 'MeetingInfoV2AdhocMeetingError';
+    this.sdkMessage = message;
+    this.stack = new Error().stack;
+    this.wbxAppApiCode = wbxAppApiErrorCode;
+  }
+}
+
+/**
+ * Error generating an instant meeting
+ */
+export class MeetingInfoV2InstantMeetingError extends Error {
+  sdkMessage: any;
+  wbxAppApiCode: any;
+  /**
+   *
+   * @constructor
+   * @param {Number} [wbxAppApiErrorCode]
+   * @param {String} [message]
+   */
+  constructor(wbxAppApiErrorCode?: number, message: string = INSTANT_MEETING_DEFAULT_ERROR) {
+    super(`${message}, code=${wbxAppApiErrorCode}`);
+    this.name = 'MeetingInfoV2InstantMeetingError';
     this.sdkMessage = message;
     this.stack = new Error().stack;
     this.wbxAppApiCode = wbxAppApiErrorCode;
@@ -467,6 +490,52 @@ export default class MeetingInfoV2 {
           stack: err.stack,
         });
         throw new MeetingInfoV2AdhocMeetingError(err.body?.code, err.body?.message);
+      });
+  }
+
+  /**
+   * Creates an instant meeting using the /instantMeeting endpoint
+   * @param {String} installedOrgID - Org ID of user's machine for Webex app BYOD check
+   * @param {String} from - Source of the instant meeting request (e.g., 'webexapp', 'cloud-registered-device')
+   * @returns {Promise} returns a meeting info object
+   * @public
+   * @memberof MeetingInfo
+   */
+  async createInstantMeeting(installedOrgID?: string, from = 'webexapp') {
+    if (!this.webex.meetings.preferredWebexSite) {
+      throw Error('No preferred webex site found');
+    }
+
+    const body: any = {};
+
+    if (installedOrgID) {
+      body.installedOrgID = installedOrgID;
+    }
+
+    const uri = `https://${this.webex.meetings.preferredWebexSite}/wbxappapi/v2/meetings/instantMeeting?from=${from}`;
+
+    return this.webex
+      .request({
+        method: HTTP_VERBS.POST,
+        uri,
+        body,
+      })
+      .then((requestResult) => {
+        Metrics.sendBehavioralMetric(BEHAVIORAL_METRICS.INSTANT_MEETING_SUCCESS);
+
+        return requestResult;
+      })
+      .catch((err) => {
+        this.handlePolicyError(err);
+        this.handleJoinWebinarError(err);
+        this.handleForbiddenError(err);
+
+        Metrics.sendBehavioralMetric(BEHAVIORAL_METRICS.INSTANT_MEETING_FAILURE, {
+          reason: err.message,
+          stack: err.stack,
+          errorCode: err.body?.code,
+        });
+        throw new MeetingInfoV2InstantMeetingError(err.body?.code, err.body?.message);
       });
   }
 
