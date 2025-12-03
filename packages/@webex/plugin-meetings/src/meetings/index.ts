@@ -1578,7 +1578,7 @@ export default class Meetings extends WebexPlugin {
       // to avoid a spike in traffic to the wbxappi service
       let waitingTime = 0;
 
-      if (destination.meeting) {
+      if (destination?.meeting) {
         const {startTime} = destination.meeting;
         const startTimeDate = new Date(startTime);
         const startTimeDatestamp = startTimeDate.getTime();
@@ -1590,7 +1590,7 @@ export default class Meetings extends WebexPlugin {
 
         waitingTime = Math.round(Math.random() * maxWaitingTime);
       }
-      const isMeetingActive = !!destination.fullState?.active;
+      const isMeetingActive = !!destination?.fullState?.active;
       // @ts-ignore
       const {enableUnifiedMeetings} = this.config.experimental;
       const meetingInfoOptions = {
@@ -1610,6 +1610,10 @@ export default class Meetings extends WebexPlugin {
           );
           meeting.parseMeetingInfo(undefined, destination);
         } else {
+          if (type === DESTINATION_TYPE.INSTANT_MEETING) {
+            // @ts-ignore
+            meetingInfoOptions.type = 'instantMeeting';
+          }
           await meeting.fetchMeetingInfo(meetingInfoOptions);
         }
       }

@@ -140,6 +140,13 @@ export default class MeetingInfoUtil {
     const {type, webex} = from;
     let {destination} = from;
 
+    if (type === DESTINATION_TYPE.INSTANT_MEETING) {
+      return {
+        destination: undefined,
+        type: DESTINATION_TYPE.INSTANT_MEETING,
+      };
+    }
+
     if (type === DESTINATION_TYPE.PERSONAL_ROOM) {
       // this case checks if your type is personal room
       if (!destination) {

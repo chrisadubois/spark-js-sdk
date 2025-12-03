@@ -729,6 +729,10 @@ export default class MeetingInfoV2 {
       webex: this.webex,
     });
 
+    if (destinationType.type === DESTINATION_TYPE.INSTANT_MEETING) {
+      return this.createInstantMeeting(installedOrgID);
+    }
+
     if (
       destinationType.type === DESTINATION_TYPE.CONVERSATION_URL &&
       this.webex.config.meetings.experimental.enableAdhocMeetings &&
