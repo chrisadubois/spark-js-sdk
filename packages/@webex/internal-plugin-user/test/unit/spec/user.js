@@ -169,21 +169,12 @@ describe('plugin-user', () => {
           /`options.newSiteUrl` is required/
         ));
 
-      it('rejects when device has no userId', () => {
-        webex.internal.device.userId = undefined;
-
-        return assert.isRejected(
-          userService.updatePreferredWebexSite({newSiteUrl: 'new.webex.com'}),
-          /Device is not registered/
-        );
-      });
-
-      it('rejects when orgId cannot be determined and none provided', () => {
+      it('lets getOrgId errors propagate when none provided', () => {
         webex.credentials.getOrgId = sinon.stub().throws(new Error('no org'));
 
-        return assert.isRejected(
-          userService.updatePreferredWebexSite({newSiteUrl: 'new.webex.com'}),
-          /Unable to determine organization ID/
+        assert.throws(
+          () => userService.updatePreferredWebexSite({newSiteUrl: 'new.webex.com'}),
+          /no org/
         );
       });
 

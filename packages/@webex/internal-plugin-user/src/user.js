@@ -316,8 +316,7 @@ const User = WebexPlugin.extend({
   },
 
   /**
-   * Updates the user's preferred Webex meeting site via SCIM PATCH.
-   * Uses the org-scoped SCIM endpoint matching the native client implementation.
+   * Updates the user's preferred Webex meeting site via org-scoped SCIM PATCH.
    * @instance
    * @memberof User
    * @param {Object} options
@@ -331,25 +330,9 @@ const User = WebexPlugin.extend({
       return Promise.reject(new Error('`options.newSiteUrl` is required'));
     }
 
+    const resolvedOrgId = orgId || this.webex.credentials.getOrgId();
     const {userId} = this.webex.internal.device;
-
-    if (!userId) {
-      return Promise.reject(new Error('Device is not registered; `userId` is unavailable'));
-    }
-
-    let resolvedOrgId = orgId;
-
-    if (!resolvedOrgId) {
-      try {
-        resolvedOrgId = this.webex.credentials.getOrgId();
-      } catch (e) {
-        return Promise.reject(new Error('Unable to determine organization ID from credentials'));
-      }
-    }
-
-    const identityUrl =
-      (this.webex.config.credentials.identity && this.webex.config.credentials.identity.url) ||
-      'https://identity.webex.com';
+    const {url: identityUrl} = this.webex.config.credentials.identity;
 
     const userPreferences = [];
 
