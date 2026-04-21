@@ -9,6 +9,55 @@ import {persist, WebexPlugin, waitForValue} from '@webex/webex-core';
 import UserUUIDBatcher from './user-uuid-batcher';
 import UserUUIDStore from './user-uuid-store';
 
+const SCIM_SCHEMAS = [
+  'urn:scim:schemas:core:1.0',
+  'urn:scim:schemas:extension:cisco:commonidentity:1.0',
+];
+
+/**
+ * Builds a SCIM PATCH body for updating the user's preferred Webex site.
+ * Matches the native client's SCIM format: delete old + add new in a single PATCH.
+ * @param {string} newSiteUrl - The new preferred site
+ * @param {string} [oldSiteUrl] - The previous preferred site to remove
+ * @returns {Object} SCIM-formatted request body
+ */
+function buildPreferredSiteBody(newSiteUrl, oldSiteUrl) {
+  const userPreferences = [];
+
+  if (oldSiteUrl) {
+    userPreferences.push({
+      operation: 'delete',
+      value: `"preferredWebExSite":"${oldSiteUrl}"`,
+    });
+  }
+
+  userPreferences.push({
+    value: `"preferredWebExSite":"${newSiteUrl}"`,
+  });
+
+  return {schemas: SCIM_SCHEMAS, userPreferences};
+}
+
+/**
+ * Builds a deduplicated, sorted list of meeting sites from a user profile.
+ * Merges linkedTrainSiteNames and trainSiteNames, filters attendee-only
+ * sites (containing '#'), and sorts alphabetically.
+ * Matches the native client's site list filtering logic.
+ * @param {Object} user - User profile object
+ * @param {string[]} [user.linkedTrainSiteNames] - Linked training site names
+ * @param {string[]} [user.trainSiteNames] - Training site names
+ * @returns {string[]} Sorted array of site URLs
+ */
+function buildMeetingSiteList(user) {
+  const linked = (user && user.linkedTrainSiteNames) || [];
+  const train = (user && user.trainSiteNames) || [];
+
+  return linked
+    .concat(train)
+    .filter((site) => site.indexOf('#') === -1)
+    .sort();
+}
+
 /**
  * @class
  */
@@ -334,19 +383,6 @@ const User = WebexPlugin.extend({
     const {userId} = this.webex.internal.device;
     const {url: identityUrl} = this.webex.config.credentials.identity;
 
-    const userPreferences = [];
-
-    if (oldSiteUrl) {
-      userPreferences.push({
-        operation: 'delete',
-        value: `"preferredWebExSite":"${oldSiteUrl}"`,
-      });
-    }
-
-    userPreferences.push({
-      value: `"preferredWebExSite":"${newSiteUrl}"`,
-    });
-
     return this.webex.credentials
       .getUserToken()
       .then((token) =>
@@ -356,37 +392,22 @@ const User = WebexPlugin.extend({
           headers: {
             authorization: token.toString(),
           },
-          body: {
-            schemas: [
-              'urn:scim:schemas:core:1.0',
-              'urn:scim:schemas:extension:cisco:commonidentity:1.0',
-            ],
-            userPreferences,
-          },
+          body: buildPreferredSiteBody(newSiteUrl, oldSiteUrl),
         })
       )
       .then((res) => res.body);
   },
 
   /**
-   * Builds a sorted, filtered list of meeting sites from a user profile.
-   * Merges linkedTrainSiteNames and trainSiteNames, filters attendee-only
-   * sites (containing '#'), and sorts alphabetically.
+   * Returns a sorted, filtered list of meeting sites from a user profile.
+   * Delegates to the pure buildMeetingSiteList function.
    * @instance
    * @memberof User
    * @param {Object} user - User profile object from webex.internal.user.get()
-   * @param {string[]} [user.linkedTrainSiteNames] - Linked training site names
-   * @param {string[]} [user.trainSiteNames] - Training site names
    * @returns {string[]} Sorted array of site URLs
    */
   getMeetingSiteList(user) {
-    const linked = (user && user.linkedTrainSiteNames) || [];
-    const train = (user && user.trainSiteNames) || [];
-
-    return linked
-      .concat(train)
-      .filter((site) => site.indexOf('#') === -1)
-      .sort();
+    return buildMeetingSiteList(user);
   },
 
   /**
@@ -538,3 +559,4 @@ const User = WebexPlugin.extend({
 });
 
 export default User;
+export {buildPreferredSiteBody, buildMeetingSiteList, SCIM_SCHEMAS};

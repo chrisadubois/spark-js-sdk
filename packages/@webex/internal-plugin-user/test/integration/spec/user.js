@@ -257,6 +257,48 @@ runs.forEach((run) => {
         }));
     });
 
+    describe('#getMeetingSiteList()', () => {
+      it('returns an array of sites from the user profile', () =>
+        webex.internal.user.get().then((user) => {
+          const sites = webex.internal.user.getMeetingSiteList(user);
+
+          assert.isArray(sites);
+          sites.forEach((site) => {
+            assert.isString(site);
+            assert.notInclude(site, '#');
+          });
+        }));
+    });
+
+    describe('#updatePreferredWebexSite()', () => {
+      it('performs a SCIM PATCH and returns a response body', () =>
+        webex.internal.user.get().then((user) => {
+          const sites = webex.internal.user.getMeetingSiteList(user);
+
+          if (sites.length === 0) {
+            // Test user has no sites — cannot test site update
+            return undefined;
+          }
+
+          const targetSite = sites[0];
+
+          return webex.internal.user
+            .updatePreferredWebexSite({newSiteUrl: targetSite})
+            .then((result) => {
+              assert.property(result, 'id');
+              assert.property(result, 'userName');
+              assert.property(result, 'userPreferences');
+              assert.isArray(result.userPreferences);
+
+              const hasPref = result.userPreferences.some(
+                (p) => (typeof p === 'string' ? p : p.value || '').includes('preferredWebExSite')
+              );
+
+              assert.isTrue(hasPref, 'userPreferences should contain preferredWebExSite');
+            });
+        }));
+    });
+
     describe('#asUUID()', () => {
       function makeEmailAddress() {
         return `webex-js-sdk--test-${uuid.v4()}@example.com`;

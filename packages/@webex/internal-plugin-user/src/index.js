@@ -13,3 +13,4 @@ registerInternalPlugin('user', User, {
 });
 
 export {default} from './user';
+export {buildPreferredSiteBody, buildMeetingSiteList, SCIM_SCHEMAS} from './user';

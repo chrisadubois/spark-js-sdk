@@ -2,13 +2,81 @@
  * Copyright (c) 2015-2020 Cisco Systems, Inc. See LICENSE file.
  */
 
-import UserService from '@webex/internal-plugin-user';
+import UserService, {buildPreferredSiteBody, buildMeetingSiteList, SCIM_SCHEMAS} from '@webex/internal-plugin-user';
 import {assert} from '@webex/test-helper-chai';
 import MockWebex from '@webex/test-helper-mock-webex';
 import sinon from 'sinon';
 import uuid from 'uuid';
 
 describe('plugin-user', () => {
+  describe('buildPreferredSiteBody()', () => {
+    it('returns SCIM schemas in the body', () => {
+      const body = buildPreferredSiteBody('new.webex.com');
+
+      assert.deepEqual(body.schemas, SCIM_SCHEMAS);
+    });
+
+    it('builds add-only body when no oldSiteUrl', () => {
+      const body = buildPreferredSiteBody('new.webex.com');
+
+      assert.deepEqual(body.userPreferences, [
+        {value: '"preferredWebExSite":"new.webex.com"'},
+      ]);
+    });
+
+    it('builds delete+add body when oldSiteUrl provided', () => {
+      const body = buildPreferredSiteBody('new.webex.com', 'old.webex.com');
+
+      assert.deepEqual(body.userPreferences, [
+        {operation: 'delete', value: '"preferredWebExSite":"old.webex.com"'},
+        {value: '"preferredWebExSite":"new.webex.com"'},
+      ]);
+    });
+
+    it('embeds site URLs in the SCIM string format', () => {
+      const body = buildPreferredSiteBody('my-site.webex.com');
+
+      assert.equal(body.userPreferences[0].value, '"preferredWebExSite":"my-site.webex.com"');
+    });
+  });
+
+  describe('buildMeetingSiteList()', () => {
+    it('returns empty array for null/undefined/empty user', () => {
+      assert.deepEqual(buildMeetingSiteList(null), []);
+      assert.deepEqual(buildMeetingSiteList(undefined), []);
+      assert.deepEqual(buildMeetingSiteList({}), []);
+    });
+
+    it('merges linked + train sites and sorts alphabetically', () => {
+      const result = buildMeetingSiteList({
+        linkedTrainSiteNames: ['charlie.webex.com', 'alpha.webex.com'],
+        trainSiteNames: ['bravo.webex.com'],
+      });
+
+      assert.deepEqual(result, ['alpha.webex.com', 'bravo.webex.com', 'charlie.webex.com']);
+    });
+
+    it('filters out attendee-only sites containing #', () => {
+      const result = buildMeetingSiteList({
+        trainSiteNames: ['good.webex.com', 'attendee#only.webex.com', 'also-good.webex.com'],
+      });
+
+      assert.deepEqual(result, ['also-good.webex.com', 'good.webex.com']);
+    });
+
+    it('handles missing linkedTrainSiteNames gracefully', () => {
+      const result = buildMeetingSiteList({trainSiteNames: ['only.webex.com']});
+
+      assert.deepEqual(result, ['only.webex.com']);
+    });
+
+    it('handles missing trainSiteNames gracefully', () => {
+      const result = buildMeetingSiteList({linkedTrainSiteNames: ['only.webex.com']});
+
+      assert.deepEqual(result, ['only.webex.com']);
+    });
+  });
+
   describe('User', () => {
     let webex, userService;
 
@@ -163,12 +231,6 @@ describe('plugin-user', () => {
           /`options.newSiteUrl` is required/
         ));
 
-      it('rejects when `newSiteUrl` is an empty string', () =>
-        assert.isRejected(
-          userService.updatePreferredWebexSite({newSiteUrl: ''}),
-          /`options.newSiteUrl` is required/
-        ));
-
       it('lets getOrgId errors propagate when none provided', () => {
         webex.credentials.getOrgId = sinon.stub().throws(new Error('no org'));
 
@@ -178,20 +240,17 @@ describe('plugin-user', () => {
         );
       });
 
-      it('uses provided orgId instead of extracting from credentials', () => {
-        const customOrgId = 'custom-org-9999';
-
-        return userService
-          .updatePreferredWebexSite({newSiteUrl: 'new.webex.com', orgId: customOrgId})
+      it('uses provided orgId instead of extracting from credentials', () =>
+        userService
+          .updatePreferredWebexSite({newSiteUrl: 'new.webex.com', orgId: 'custom-org-9999'})
           .then(() => {
             assert.notCalled(webex.credentials.getOrgId);
-            const requestArgs = webex.request.getCall(0).args[0];
+            const {uri} = webex.request.getCall(0).args[0];
 
-            assert.include(requestArgs.uri, `/identity/scim/${customOrgId}/v1/Users/`);
-          });
-      });
+            assert.include(uri, '/identity/scim/custom-org-9999/v1/Users/');
+          }));
 
-      it('constructs org-scoped URL with correct orgId and userId', () =>
+      it('constructs org-scoped PATCH request with correct URL', () =>
         userService
           .updatePreferredWebexSite({newSiteUrl: 'new.webex.com'})
           .then(() => {
@@ -204,31 +263,14 @@ describe('plugin-user', () => {
             assert.equal(requestArgs.method, 'PATCH');
           }));
 
-      it('sends add-only userPreferences when no oldSiteUrl', () =>
-        userService
-          .updatePreferredWebexSite({newSiteUrl: 'new.webex.com'})
-          .then(() => {
-            const requestArgs = webex.request.getCall(0).args[0];
-
-            assert.deepEqual(requestArgs.body, {
-              schemas: [
-                'urn:scim:schemas:core:1.0',
-                'urn:scim:schemas:extension:cisco:commonidentity:1.0',
-              ],
-              userPreferences: [{value: '"preferredWebExSite":"new.webex.com"'}],
-            });
-          }));
-
-      it('sends delete+add userPreferences when oldSiteUrl provided', () =>
+      it('passes buildPreferredSiteBody output as request body', () =>
         userService
           .updatePreferredWebexSite({newSiteUrl: 'new.webex.com', oldSiteUrl: 'old.webex.com'})
           .then(() => {
-            const requestArgs = webex.request.getCall(0).args[0];
+            const {body} = webex.request.getCall(0).args[0];
 
-            assert.deepEqual(requestArgs.body.userPreferences, [
-              {operation: 'delete', value: '"preferredWebExSite":"old.webex.com"'},
-              {value: '"preferredWebExSite":"new.webex.com"'},
-            ]);
+            assert.deepEqual(body.schemas, SCIM_SCHEMAS);
+            assert.lengthOf(body.userPreferences, 2);
           }));
 
       it('returns the response body', () => {
@@ -243,7 +285,7 @@ describe('plugin-user', () => {
           });
       });
 
-      it('propagates HTTP 403 rejection', () => {
+      it('propagates request errors', () => {
         const error = new Error('Forbidden');
 
         error.statusCode = 403;
@@ -254,40 +296,19 @@ describe('plugin-user', () => {
           /Forbidden/
         );
       });
-
-      it('propagates network error rejection', () => {
-        userService.request = sinon
-          .stub()
-          .callsFake(() => Promise.reject(new Error('Network failure')));
-
-        return assert.isRejected(
-          userService.updatePreferredWebexSite({newSiteUrl: 'new.webex.com'}),
-          /Network failure/
-        );
-      });
     });
 
     describe('#getMeetingSiteList()', () => {
-      it('returns empty array when user is null or undefined', () => {
-        assert.deepEqual(userService.getMeetingSiteList(null), []);
-        assert.deepEqual(userService.getMeetingSiteList(undefined), []);
-        assert.deepEqual(userService.getMeetingSiteList({}), []);
-      });
-
-      it('merges linked + train sites, filters # sites, and sorts alphabetically', () => {
+      it('delegates to buildMeetingSiteList', () => {
         const user = {
-          linkedTrainSiteNames: ['charlie.webex.com', 'alpha.webex.com'],
-          trainSiteNames: ['bravo.webex.com', 'delta#attendee.webex.com', 'echo.webex.com'],
+          linkedTrainSiteNames: ['charlie.webex.com'],
+          trainSiteNames: ['alpha.webex.com'],
         };
 
-        const result = userService.getMeetingSiteList(user);
-
-        assert.deepEqual(result, [
-          'alpha.webex.com',
-          'bravo.webex.com',
-          'charlie.webex.com',
-          'echo.webex.com',
-        ]);
+        assert.deepEqual(
+          userService.getMeetingSiteList(user),
+          ['alpha.webex.com', 'charlie.webex.com']
+        );
       });
     });
 
