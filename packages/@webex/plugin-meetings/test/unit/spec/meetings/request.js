@@ -3,8 +3,11 @@ import sinon from 'sinon';
 import {assert} from '@webex/test-helper-chai';
 import MockWebex from '@webex/test-helper-mock-webex';
 import Meetings from '@webex/plugin-meetings';
+import ParameterError from '@webex/plugin-meetings/src/common/errors/parameter';
 import MeetingRequest from '@webex/plugin-meetings/src/meetings/request';
 import {SitePreferenceSelectOption} from '@webex/plugin-meetings/src/meetings/meetings.types';
+
+const multipartSitePrefixList = ['.my.', '.mydmz.', '.mybts.', '.mydev.', '.myats2.', '.myats.'];
 
 describe('plugin-meetings/meetings/request', () => {
   let meetingRequest;
@@ -44,8 +47,20 @@ describe('plugin-meetings/meetings/request', () => {
       assert.calledOnceWithExactly(request, expectedOptions);
     };
 
+    it('throws a parameter error when no Webex site is available', () => {
+      assert.throws(
+        () => meetingRequest.fetchSitePreferencesMeViaSite(),
+        ParameterError,
+        'No siteUrl available. Call register() before fetching site preferences or provide options.siteUrl.'
+      );
+      assert.notCalled(request);
+    });
+
     it('fetches scheduling preferences by default', async () => {
-      const result = await meetingRequest.fetchSitePreferencesMeViaSite({siteUrl: 'go.webex.com'});
+      const result = await meetingRequest.fetchSitePreferencesMeViaSite(
+        {siteUrl: 'go.webex.com'},
+        multipartSitePrefixList
+      );
 
       assert.deepEqual(result, {
         scheduling: {
@@ -60,7 +75,10 @@ describe('plugin-meetings/meetings/request', () => {
     });
 
     it('derives the site name for my.webex.com sites', async () => {
-      await meetingRequest.fetchSitePreferencesMeViaSite({siteUrl: 'go.my.webex.com'});
+      await meetingRequest.fetchSitePreferencesMeViaSite(
+        {siteUrl: 'go.my.webex.com'},
+        multipartSitePrefixList
+      );
 
       assertRequest({
         method: 'GET',
@@ -68,11 +86,23 @@ describe('plugin-meetings/meetings/request', () => {
       });
     });
 
-    it('supports custom site name overrides', async () => {
-      await meetingRequest.fetchSitePreferencesMeViaSite({
-        siteUrl: 'go.webex.com',
-        siteName: 'custom-site',
+    it('uses the configured multipart site prefix list to derive the site name', async () => {
+      await meetingRequest.fetchSitePreferencesMeViaSite({siteUrl: 'go.my.webex.com'}, ['.custom.']);
+
+      assertRequest({
+        method: 'GET',
+        uri: 'https://go.my.webex.com/wbxappapi/v1/users/me/preference?select=scheduling&siteurl=go',
       });
+    });
+
+    it('supports custom site name overrides', async () => {
+      await meetingRequest.fetchSitePreferencesMeViaSite(
+        {
+          siteUrl: 'go.webex.com',
+          siteName: 'custom-site',
+        },
+        multipartSitePrefixList
+      );
 
       assertRequest({
         method: 'GET',
@@ -81,10 +111,13 @@ describe('plugin-meetings/meetings/request', () => {
     });
 
     it('supports enum-backed preference sections', async () => {
-      await meetingRequest.fetchSitePreferencesMeViaSite({
-        siteUrl: 'go.webex.com',
-        selectOptions: [SitePreferenceSelectOption.SCHEDULING],
-      });
+      await meetingRequest.fetchSitePreferencesMeViaSite(
+        {
+          siteUrl: 'go.webex.com',
+          selectOptions: [SitePreferenceSelectOption.SCHEDULING],
+        },
+        multipartSitePrefixList
+      );
 
       assertRequest({
         method: 'GET',
@@ -98,7 +131,10 @@ describe('plugin-meetings/meetings/request', () => {
       request.rejects(error);
 
       await assert.isRejected(
-        meetingRequest.fetchSitePreferencesMeViaSite({siteUrl: 'go.webex.com'}),
+        meetingRequest.fetchSitePreferencesMeViaSite(
+          {siteUrl: 'go.webex.com'},
+          multipartSitePrefixList
+        ),
         'site preferences failed'
       );
     });

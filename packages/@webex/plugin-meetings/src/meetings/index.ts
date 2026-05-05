@@ -64,7 +64,6 @@ import {
 } from './meetings.types';
 import MeetingsUtil from './util';
 import PermissionError from '../common/errors/permission';
-import ParameterError from '../common/errors/parameter';
 import JoinWebinarError from '../common/errors/join-webinar-error';
 import {SpaceIDDeprecatedError} from '../common/errors/webex-errors';
 import NoMeetingInfoError from '../common/errors/no-meeting-info';
@@ -1409,7 +1408,9 @@ export default class Meetings extends WebexPlugin {
   }
 
   /**
-   * Fetches appapi user site preferences for the preferred Webex site.
+   * Fetches site preferences via select options for the site specified in options or the preferred site if not specified.
+   * If siteName is provided, it will be used as a query override to fetch the site preferences,
+   * otherwise the site preferences for the site specified in options.siteUrl or the preferred site will be fetched.
    *
    * @param {object} [options]
    * @param {string} [options.siteUrl] - Webex site URL. Defaults to preferredWebexSite.
@@ -1426,15 +1427,16 @@ export default class Meetings extends WebexPlugin {
   public fetchSitePreferencesMeViaSite(
     options: FetchSitePreferencesMeViaSiteOptions = {}
   ): Promise<SitePreferencesResponse> {
-    const siteUrl = options.siteUrl || this.preferredWebexSite;
+    // @ts-ignore - config comes from registerPlugin
+    const {multipartSitePrefixList} = this.config;
 
-    if (!siteUrl) {
-      throw new ParameterError(
-        'No siteUrl available. Call register() before fetching site preferences or provide options.siteUrl.'
-      );
-    }
-
-    return this.request.fetchSitePreferencesMeViaSite({...options, siteUrl});
+    return this.request.fetchSitePreferencesMeViaSite(
+      {
+        ...options,
+        siteUrl: options.siteUrl || this.preferredWebexSite,
+      },
+      multipartSitePrefixList
+    );
   }
 
   /**

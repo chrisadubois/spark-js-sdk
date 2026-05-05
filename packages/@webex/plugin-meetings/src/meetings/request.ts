@@ -2,6 +2,7 @@
 import {StatelessWebexPlugin} from '@webex/webex-core';
 
 import LoggerProxy from '../common/logs/logger-proxy';
+import ParameterError from '../common/errors/parameter';
 import {HTTP_VERBS, API, RESOURCE} from '../constants';
 import {
   DEFAULT_SITE_PREFERENCE_SELECT_OPTIONS,
@@ -54,19 +55,29 @@ export default class MeetingRequest extends StatelessWebexPlugin {
   /**
    * Fetches appapi user site preferences for a Webex site.
    *
-   * @param {object} options
-   * @param {string} options.siteUrl - Webex site URL, for example "go.webex.com".
+   * @param {object} [options]
+   * @param {string} [options.siteUrl] - Webex site URL, for example "go.webex.com".
    * @param {string} [options.siteName] - Site name query override.
    * @param {SitePreferenceSelectOption[]} [options.selectOptions] - Preference sections to fetch.
+   * @param {string[]} [multipartSitePrefixList] - Prefix list used to derive multipart site names.
    * @returns {Promise<SitePreferencesResponse>} site preferences response body
+   * @throws {ParameterError}
    * @public
    * @memberof MeetingRequest
    */
-  fetchSitePreferencesMeViaSite({
-    siteUrl,
-    siteName = MeetingsUtil.getSiteName(siteUrl),
-    selectOptions = DEFAULT_SITE_PREFERENCE_SELECT_OPTIONS,
-  }: FetchSitePreferencesMeViaSiteOptions & {siteUrl: string}): Promise<SitePreferencesResponse> {
+  fetchSitePreferencesMeViaSite(
+    options: FetchSitePreferencesMeViaSiteOptions = {},
+    multipartSitePrefixList: string[] = []
+  ): Promise<SitePreferencesResponse> {
+    const {siteUrl, selectOptions = DEFAULT_SITE_PREFERENCE_SELECT_OPTIONS} = options;
+
+    if (!siteUrl) {
+      throw new ParameterError(
+        'No siteUrl available. Call register() before fetching site preferences or provide options.siteUrl.'
+      );
+    }
+
+    const siteName = options.siteName || MeetingsUtil.getSiteName(siteUrl, multipartSitePrefixList);
     const select = encodeURIComponent(selectOptions.join(','));
     const encodedSiteName = encodeURIComponent(siteName);
 

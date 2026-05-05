@@ -1386,7 +1386,8 @@ describe('plugin-meetings', () => {
               webex.meetings.request.fetchSitePreferencesMeViaSite,
               {
                 siteUrl: 'go.webex.com',
-              }
+              },
+              webex.meetings.config.multipartSitePrefixList
             );
           });
 
@@ -1399,7 +1400,8 @@ describe('plugin-meetings', () => {
               webex.meetings.request.fetchSitePreferencesMeViaSite,
               {
                 siteUrl: 'go.webex.com',
-              }
+              },
+              webex.meetings.config.multipartSitePrefixList
             );
           });
 
@@ -1417,19 +1419,27 @@ describe('plugin-meetings', () => {
                 siteUrl: 'go.webex.com',
                 siteName: 'custom-site',
                 selectOptions: [SitePreferenceSelectOption.SCHEDULING],
-              }
+              },
+              webex.meetings.config.multipartSitePrefixList
             );
           });
 
           it('rejects when no Webex site is available', async () => {
             webex.meetings.preferredWebexSite = '';
+            webex.meetings.request.fetchSitePreferencesMeViaSite.throws(
+              new ParameterError(
+                'No siteUrl available. Call register() before fetching site preferences or provide options.siteUrl.'
+              )
+            );
 
             assert.throws(
               () => webex.meetings.fetchSitePreferencesMeViaSite(),
               ParameterError,
               'No siteUrl available. Call register() before fetching site preferences or provide options.siteUrl.'
             );
-            assert.notCalled(webex.meetings.request.fetchSitePreferencesMeViaSite);
+            assert.calledOnceWithExactly(webex.meetings.request.fetchSitePreferencesMeViaSite, {
+              siteUrl: '',
+            }, webex.meetings.config.multipartSitePrefixList);
           });
         });
         describe('Static shortcut proxy methods', () => {

@@ -5,6 +5,8 @@ import MeetingsUtil from '@webex/plugin-meetings/src/meetings/util';
 import Metrics from '@webex/plugin-meetings/src/metrics';
 import BEHAVIORAL_METRICS from '@webex/plugin-meetings/src/metrics/constants';
 
+const multipartSitePrefixList = ['.my.', '.mydmz.', '.mybts.', '.mydev.', '.myats2.', '.myats.'];
+
 describe('plugin-meetings', () => {
   beforeEach(() => {
     sinon.stub(Metrics, 'sendBehavioralMetric');
@@ -77,15 +79,23 @@ describe('plugin-meetings', () => {
 
     describe('#getSiteName', () => {
       it('gets the site name from a standard Webex site', () => {
-        assert.equal(MeetingsUtil.getSiteName('go.webex.com'), 'go');
+        assert.equal(MeetingsUtil.getSiteName('go.webex.com', multipartSitePrefixList), 'go');
       });
 
       it('gets the site name from a my Webex site', () => {
-        assert.equal(MeetingsUtil.getSiteName('go.my.webex.com'), 'go.my');
+        assert.equal(MeetingsUtil.getSiteName('go.my.webex.com', multipartSitePrefixList), 'go.my');
+      });
+
+      it('uses the configured multipart site prefix list', () => {
+        assert.equal(MeetingsUtil.getSiteName('go.custom.webex.com', ['.custom.']), 'go.custom');
+      });
+
+      it('falls back to the first label when the multipart site prefix list does not match', () => {
+        assert.equal(MeetingsUtil.getSiteName('go.my.webex.com', ['.custom.']), 'go');
       });
 
       it('returns null when the site is empty', () => {
-        assert.equal(MeetingsUtil.getSiteName(''), null);
+        assert.equal(MeetingsUtil.getSiteName('', multipartSitePrefixList), null);
       });
     });
 
