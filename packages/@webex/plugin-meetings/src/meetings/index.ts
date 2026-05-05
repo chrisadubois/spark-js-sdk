@@ -55,16 +55,16 @@ import PasswordError from '../common/errors/password-error';
 import CaptchaError from '../common/errors/captcha-error';
 import MeetingCollection from './collection';
 import {
-  DEFAULT_SITE_PREFERENCE_SELECT,
+  FetchSitePreferencesMeViaSiteOptions,
   MEETING_KEY,
   INoiseReductionEffect,
   IVirtualBackgroundEffect,
   MeetingRegistrationStatus,
-  SitePreferenceSelect,
   SitePreferencesResponse,
 } from './meetings.types';
 import MeetingsUtil from './util';
 import PermissionError from '../common/errors/permission';
+import ParameterError from '../common/errors/parameter';
 import JoinWebinarError from '../common/errors/join-webinar-error';
 import {SpaceIDDeprecatedError} from '../common/errors/webex-errors';
 import NoMeetingInfoError from '../common/errors/no-meeting-info';
@@ -1411,8 +1411,12 @@ export default class Meetings extends WebexPlugin {
   /**
    * Fetches appapi user site preferences for the preferred Webex site.
    *
-   * @param {string[]} [selectOptions] - Preference sections to fetch.
+   * @param {object} [options]
+   * @param {string} [options.siteUrl] - Webex site URL. Defaults to preferredWebexSite.
+   * @param {string} [options.siteName] - Site name query override.
+   * @param {SitePreferenceSelectOption[]} [options.selectOptions] - Preference sections to fetch.
    * @returns {Promise<SitePreferencesResponse>} site preferences response body
+   * @throws {ParameterError}
    * @public
    * @memberof Meetings
    * @example
@@ -1420,17 +1424,17 @@ export default class Meetings extends WebexPlugin {
    * const canScheduleWebinar = preferences.scheduling?.supportScheduleWebinar;
    */
   public fetchSitePreferencesMeViaSite(
-    selectOptions: SitePreferenceSelect = DEFAULT_SITE_PREFERENCE_SELECT
+    options: FetchSitePreferencesMeViaSiteOptions = {}
   ): Promise<SitePreferencesResponse> {
-    if (!this.preferredWebexSite) {
-      return Promise.reject(
-        new Error(
-          'No preferred Webex site available. Call register() before fetching site preferences.'
-        )
+    const siteUrl = options.siteUrl || this.preferredWebexSite;
+
+    if (!siteUrl) {
+      throw new ParameterError(
+        'No siteUrl available. Call register() before fetching site preferences or provide options.siteUrl.'
       );
     }
 
-    return this.request.fetchSitePreferencesMeViaSite(this.preferredWebexSite, selectOptions);
+    return this.request.fetchSitePreferencesMeViaSite({...options, siteUrl});
   }
 
   /**

@@ -4,8 +4,8 @@ import {StatelessWebexPlugin} from '@webex/webex-core';
 import LoggerProxy from '../common/logs/logger-proxy';
 import {HTTP_VERBS, API, RESOURCE} from '../constants';
 import {
-  DEFAULT_SITE_PREFERENCE_SELECT,
-  type SitePreferenceSelect,
+  DEFAULT_SITE_PREFERENCE_SELECT_OPTIONS,
+  type FetchSitePreferencesMeViaSiteOptions,
   type SitePreferencesResponse,
 } from './meetings.types';
 import MeetingsUtil from './util';
@@ -54,23 +54,26 @@ export default class MeetingRequest extends StatelessWebexPlugin {
   /**
    * Fetches appapi user site preferences for a Webex site.
    *
-   * @param {string} siteUrl - Webex site URL, for example "go.webex.com".
-   * @param {string[]} [selectOptions] - Preference sections to fetch.
+   * @param {object} options
+   * @param {string} options.siteUrl - Webex site URL, for example "go.webex.com".
+   * @param {string} [options.siteName] - Site name query override.
+   * @param {SitePreferenceSelectOption[]} [options.selectOptions] - Preference sections to fetch.
    * @returns {Promise<SitePreferencesResponse>} site preferences response body
    * @public
    * @memberof MeetingRequest
    */
-  fetchSitePreferencesMeViaSite(
-    siteUrl: string,
-    selectOptions: SitePreferenceSelect = DEFAULT_SITE_PREFERENCE_SELECT
-  ): Promise<SitePreferencesResponse> {
+  fetchSitePreferencesMeViaSite({
+    siteUrl,
+    siteName = MeetingsUtil.getSiteName(siteUrl),
+    selectOptions = DEFAULT_SITE_PREFERENCE_SELECT_OPTIONS,
+  }: FetchSitePreferencesMeViaSiteOptions & {siteUrl: string}): Promise<SitePreferencesResponse> {
     const select = encodeURIComponent(selectOptions.join(','));
-    const siteName = encodeURIComponent(MeetingsUtil.getSiteName(siteUrl));
+    const encodedSiteName = encodeURIComponent(siteName);
 
     // @ts-ignore
     return this.request({
       method: HTTP_VERBS.GET,
-      uri: `https://${siteUrl}/wbxappapi/v1/users/me/preference?select=${select}&siteurl=${siteName}`,
+      uri: `https://${siteUrl}/wbxappapi/v1/users/me/preference?select=${select}&siteurl=${encodedSiteName}`,
     }).then((res) => res.body);
   }
 

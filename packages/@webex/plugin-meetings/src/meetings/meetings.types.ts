@@ -32,9 +32,17 @@ export type MeetingRegistrationStatus = {
   checkH264Support: boolean;
 };
 
-export const DEFAULT_SITE_PREFERENCE_SELECT = ['scheduling'];
+export enum SitePreferenceSelectOption {
+  SCHEDULING = 'scheduling',
+}
 
-export type SitePreferenceSelect = string[];
+export type FetchSitePreferencesMeViaSiteOptions = {
+  siteUrl?: string;
+  siteName?: string;
+  selectOptions?: SitePreferenceSelectOption[];
+};
+
+export const DEFAULT_SITE_PREFERENCE_SELECT_OPTIONS = [SitePreferenceSelectOption.SCHEDULING];
 
 export type SitePreferencesResponse = {
   scheduling?: {

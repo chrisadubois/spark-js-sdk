@@ -4,6 +4,7 @@ import {assert} from '@webex/test-helper-chai';
 import MockWebex from '@webex/test-helper-mock-webex';
 import Meetings from '@webex/plugin-meetings';
 import MeetingRequest from '@webex/plugin-meetings/src/meetings/request';
+import {SitePreferenceSelectOption} from '@webex/plugin-meetings/src/meetings/meetings.types';
 
 describe('plugin-meetings/meetings/request', () => {
   let meetingRequest;
@@ -44,7 +45,7 @@ describe('plugin-meetings/meetings/request', () => {
     };
 
     it('fetches scheduling preferences by default', async () => {
-      const result = await meetingRequest.fetchSitePreferencesMeViaSite('go.webex.com');
+      const result = await meetingRequest.fetchSitePreferencesMeViaSite({siteUrl: 'go.webex.com'});
 
       assert.deepEqual(result, {
         scheduling: {
@@ -59,7 +60,7 @@ describe('plugin-meetings/meetings/request', () => {
     });
 
     it('derives the site name for my.webex.com sites', async () => {
-      await meetingRequest.fetchSitePreferencesMeViaSite('go.my.webex.com');
+      await meetingRequest.fetchSitePreferencesMeViaSite({siteUrl: 'go.my.webex.com'});
 
       assertRequest({
         method: 'GET',
@@ -67,12 +68,27 @@ describe('plugin-meetings/meetings/request', () => {
       });
     });
 
-    it('supports custom preference sections', async () => {
-      await meetingRequest.fetchSitePreferencesMeViaSite('go.webex.com', ['scheduling', 'custom']);
+    it('supports custom site name overrides', async () => {
+      await meetingRequest.fetchSitePreferencesMeViaSite({
+        siteUrl: 'go.webex.com',
+        siteName: 'custom-site',
+      });
 
       assertRequest({
         method: 'GET',
-        uri: 'https://go.webex.com/wbxappapi/v1/users/me/preference?select=scheduling%2Ccustom&siteurl=go',
+        uri: 'https://go.webex.com/wbxappapi/v1/users/me/preference?select=scheduling&siteurl=custom-site',
+      });
+    });
+
+    it('supports enum-backed preference sections', async () => {
+      await meetingRequest.fetchSitePreferencesMeViaSite({
+        siteUrl: 'go.webex.com',
+        selectOptions: [SitePreferenceSelectOption.SCHEDULING],
+      });
+
+      assertRequest({
+        method: 'GET',
+        uri: 'https://go.webex.com/wbxappapi/v1/users/me/preference?select=scheduling&siteurl=go',
       });
     });
 
@@ -82,7 +98,7 @@ describe('plugin-meetings/meetings/request', () => {
       request.rejects(error);
 
       await assert.isRejected(
-        meetingRequest.fetchSitePreferencesMeViaSite('go.webex.com'),
+        meetingRequest.fetchSitePreferencesMeViaSite({siteUrl: 'go.webex.com'}),
         'site preferences failed'
       );
     });
