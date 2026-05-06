@@ -1408,19 +1408,20 @@ export default class Meetings extends WebexPlugin {
   }
 
   /**
-   * Fetches appapi user site preferences for the provided Webex site, or the preferred Webex site.
+   * Fetches site preferences for the provided Webex site, or the preferred Webex site.
+   * This is used to determine capabilities of the site, such as whether scheduling a webinar is supported.
    *
    * @param {object} [options]
-   * @param {string} [options.siteUrl] - Webex site URL. Defaults to preferredWebexSite, for example "go.webex.com".
-   * @param {string} [options.siteName] - Site name query override. Defaults to the site name derived from siteUrl.
-   * @param {SitePreferenceSelectOption[]} [options.selectOptions] - Preference sections to fetch. Defaults to scheduling.
+   * @param {string} [options.siteUrl] - Webex site URL. Defaults to preferredWebexSite, for example "cisco.webex.com".
+   * @param {string} [options.siteName] - Site name query override. Defaults to the site name derived from siteUrl, for example "cisco" for "cisco.webex.com".
+   * @param {SitePreferenceSelectOption[]} [options.selectOptions] - Preference sections to fetch. Defaults to 'scheduling'.
    * @returns {Promise<SitePreferencesResponse>} site preferences response body
    * @throws {ParameterError}
    * @public
    * @memberof Meetings
    * @example
    * const preferences = await webex.meetings.fetchSitePreferencesMeViaSite();
-   * const canScheduleWebinar = preferences.scheduling?.supportScheduleWebinar;
+   * const supportScheduleWebinar = preferences?.scheduling?.supportScheduleWebinar;
    */
   public fetchSitePreferencesMeViaSite(
     options: FetchSitePreferencesMeViaSiteOptions = {}

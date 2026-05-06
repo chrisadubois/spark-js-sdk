@@ -53,12 +53,12 @@ export default class MeetingRequest extends StatelessWebexPlugin {
   }
 
   /**
-   * Fetches appapi user site preferences for a Webex site.
+   * Fetches site preferences from a given site given a select option and a siteUrl with an optional siteName. If siteName is not provided, it will be derived from the siteUrl. If siteUrl is not provided, it will throw an error. If selectOptions is not provided, it will default to scheduling.
    *
    * @param {object} [options]
-   * @param {string} [options.siteUrl] - Webex site URL, for example "go.webex.com".
-   * @param {string} [options.siteName] - Site name query override. Defaults to the site name derived from options.siteUrl.
-   * @param {SitePreferenceSelectOption[]} [options.selectOptions] - Preference sections to fetch. Defaults to scheduling.
+   * @param {string} [options.siteUrl] - Webex site URL, for example "cisco.webex.com".
+   * @param {string} [options.siteName] - Site name query override. Defaults to the site name derived from options.siteUrl, e.g., "cisco".
+   * @param {SitePreferenceSelectOption[]} [options.selectOptions] - Preference sections to fetch. Defaults to 'scheduling'.
    * @returns {Promise<SitePreferencesResponse>} site preferences response body
    * @throws {ParameterError}
    * @public
@@ -78,14 +78,14 @@ export default class MeetingRequest extends StatelessWebexPlugin {
     // @ts-ignore - config comes from registerPlugin
     const multipartSitePrefixList = this.config.meetings.multipartSitePrefixList || [];
     const siteName = options.siteName || MeetingsUtil.getSiteName(siteUrl, multipartSitePrefixList);
-    const select = encodeURIComponent(selectOptions.join(','));
-    const encodedSiteName = encodeURIComponent(siteName);
 
     // @ts-ignore
     return this.request({
       method: HTTP_VERBS.GET,
-      uri: `https://${siteUrl}/wbxappapi/v1/users/me/preference?select=${select}&siteurl=${encodedSiteName}`,
-    }).then((res) => res.body);
+      uri: `https://${siteUrl}/wbxappapi/v1/users/me/preference?select=${encodeURIComponent(
+        selectOptions.join(',')
+      )}&siteurl=${encodeURIComponent(siteName)}`,
+    }).then((res: any) => res.body);
   }
 
   // locus federation, determines and populate locus if the responseBody has remote URLs to fetch locus details
