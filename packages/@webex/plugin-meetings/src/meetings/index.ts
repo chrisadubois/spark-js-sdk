@@ -1408,14 +1408,12 @@ export default class Meetings extends WebexPlugin {
   }
 
   /**
-   * Fetches site preferences via select options for the site specified in options or the preferred site if not specified.
-   * If siteName is provided, it will be used as a query override to fetch the site preferences,
-   * otherwise the site preferences for the site specified in options.siteUrl or the preferred site will be fetched.
+   * Fetches appapi user site preferences for the provided Webex site, or the preferred Webex site.
    *
    * @param {object} [options]
-   * @param {string} [options.siteUrl] - Webex site URL. Defaults to preferredWebexSite.
-   * @param {string} [options.siteName] - Site name query override.
-   * @param {SitePreferenceSelectOption[]} [options.selectOptions] - Preference sections to fetch.
+   * @param {string} [options.siteUrl] - Webex site URL. Defaults to preferredWebexSite, for example "go.webex.com".
+   * @param {string} [options.siteName] - Site name query override. Defaults to the site name derived from siteUrl.
+   * @param {SitePreferenceSelectOption[]} [options.selectOptions] - Preference sections to fetch. Defaults to scheduling.
    * @returns {Promise<SitePreferencesResponse>} site preferences response body
    * @throws {ParameterError}
    * @public
@@ -1427,16 +1425,10 @@ export default class Meetings extends WebexPlugin {
   public fetchSitePreferencesMeViaSite(
     options: FetchSitePreferencesMeViaSiteOptions = {}
   ): Promise<SitePreferencesResponse> {
-    // @ts-ignore - config comes from registerPlugin
-    const {multipartSitePrefixList} = this.config;
-
-    return this.request.fetchSitePreferencesMeViaSite(
-      {
-        ...options,
-        siteUrl: options.siteUrl || this.preferredWebexSite,
-      },
-      multipartSitePrefixList
-    );
+    return this.request.fetchSitePreferencesMeViaSite({
+      ...options,
+      siteUrl: options.siteUrl || this.preferredWebexSite,
+    });
   }
 
   /**

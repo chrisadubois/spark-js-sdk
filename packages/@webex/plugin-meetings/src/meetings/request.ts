@@ -57,17 +57,15 @@ export default class MeetingRequest extends StatelessWebexPlugin {
    *
    * @param {object} [options]
    * @param {string} [options.siteUrl] - Webex site URL, for example "go.webex.com".
-   * @param {string} [options.siteName] - Site name query override.
-   * @param {SitePreferenceSelectOption[]} [options.selectOptions] - Preference sections to fetch.
-   * @param {string[]} [multipartSitePrefixList] - Prefix list used to derive multipart site names.
+   * @param {string} [options.siteName] - Site name query override. Defaults to the site name derived from options.siteUrl.
+   * @param {SitePreferenceSelectOption[]} [options.selectOptions] - Preference sections to fetch. Defaults to scheduling.
    * @returns {Promise<SitePreferencesResponse>} site preferences response body
    * @throws {ParameterError}
    * @public
    * @memberof MeetingRequest
    */
   fetchSitePreferencesMeViaSite(
-    options: FetchSitePreferencesMeViaSiteOptions = {},
-    multipartSitePrefixList: string[] = []
+    options: FetchSitePreferencesMeViaSiteOptions = {}
   ): Promise<SitePreferencesResponse> {
     const {siteUrl, selectOptions = DEFAULT_SITE_PREFERENCE_SELECT_OPTIONS} = options;
 
@@ -77,6 +75,8 @@ export default class MeetingRequest extends StatelessWebexPlugin {
       );
     }
 
+    // @ts-ignore - config comes from registerPlugin
+    const multipartSitePrefixList = this.config.meetings.multipartSitePrefixList || [];
     const siteName = options.siteName || MeetingsUtil.getSiteName(siteUrl, multipartSitePrefixList);
     const select = encodeURIComponent(selectOptions.join(','));
     const encodedSiteName = encodeURIComponent(siteName);
