@@ -1201,6 +1201,328 @@ describe('plugin-logger', () => {
     });
   });
 
+  describe('log transports', () => {
+    function makeTransport(send = sinon.stub().resolves()) {
+      return {send};
+    }
+
+    function makeDeferred() {
+      let resolve;
+      let reject;
+      const promise = new Promise((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise;
+        reject = rejectPromise;
+      });
+
+      return {promise, resolve, reject};
+    }
+
+    it('exports the exact redacted legacy body and sequences only buffered entries', async () => {
+      const transport = makeTransport();
+
+      webex.logger.registerTransports([transport]);
+      webex.logger.debug('not buffered');
+      webex.logger.info('first test@example.com');
+      webex.logger.warn('second');
+
+      const legacyLines = webex.logger.formatLogs().split('\n');
+      const result = await webex.logger.flushTransport(transport);
+      const records = transport.send.firstCall.args[0];
+
+      assert.deepEqual(records.map(({body}) => body), legacyLines);
+      assert.deepEqual(records.map(({sequence}) => sequence), [1, 2]);
+      assert.include(records[0].body, '[REDACTED]');
+      assert.deepEqual(result, {exported: 2, remaining: 0, dropped: 0});
+    });
+
+    it('bounds, filters, and attaches metadata without printing buffer-only logs', async () => {
+      const transport = makeTransport();
+      const longValue = 'v'.repeat(300);
+      const attributes = {
+        email: 'test@example.com',
+        longValue,
+        number: 42,
+        boolean: true,
+        zero: 0,
+        falseValue: false,
+        sixth: 'sixth',
+        seventh: 'seventh',
+        extra: 'omitted',
+        nan: Number.NaN,
+        infinity: Infinity,
+        object: {not: 'scalar'},
+        ['k'.repeat(65)]: 'long key',
+        Authorization: 'secret',
+      };
+
+      webex.logger.config.clientLevel = 'trace';
+      webex.logger.registerTransports([transport]);
+      webex.logger.client_logWithMetadata(
+        'debug',
+        {eventName: 'e'.repeat(140), attributes},
+        {bufferOnly: true},
+        'metadata log'
+      );
+
+      assert.notCalled(console.debug);
+      assert.lengthOf(webex.logger.buffer.buffer, 1);
+
+      await webex.logger.flushTransport(transport);
+      const [record] = transport.send.firstCall.args[0];
+
+      assert.lengthOf(record.eventName, 128);
+      assert.lengthOf(Object.keys(record.attributes), 8);
+      assert.equal(record.attributes.email, '[REDACTED]');
+      assert.lengthOf(record.attributes.longValue, 256);
+      assert.equal(record.attributes.number, 42);
+      assert.equal(record.attributes.boolean, true);
+      assert.notProperty(record.attributes, 'extra');
+      assert.notProperty(record.attributes, 'nan');
+      assert.notProperty(record.attributes, 'Authorization');
+    });
+
+    it('omits invalid metadata without preventing the legacy append', async () => {
+      const transport = makeTransport();
+
+      webex.logger.registerTransports([transport]);
+      webex.logger.client_logWithMetadata('info', 'invalid', {}, 'still buffered');
+      webex.logger.client_logWithMetadata('not-a-level', {}, {}, 'not buffered');
+
+      assert.lengthOf(webex.logger.buffer.buffer, 1);
+      await webex.logger.flushTransport(transport);
+      const [record] = transport.send.firstCall.args[0];
+
+      assert.notProperty(record, 'eventName');
+      assert.notProperty(record, 'attributes');
+      assert.include(record.body, 'still buffered');
+    });
+
+    it('filters registrations and deduplicates transports by identity', async () => {
+      const transport = makeTransport();
+
+      webex.logger.registerTransports([null, transport, undefined, transport]);
+      webex.logger.info('one');
+      await webex.logger.flushTransport(transport);
+      await webex.logger.flushTransport(transport);
+
+      assert.calledOnce(transport.send);
+      assert.throws(() => webex.logger.registerTransports({send() {}}), TypeError);
+      assert.throws(() => webex.logger.registerTransports([{}]), TypeError);
+      await assert.isRejected(
+        webex.logger.flushTransport(makeTransport()),
+        'Logger transport is not registered'
+      );
+    });
+
+    it('uses legacy timestamp ordering with SDK-first ties in separate buffers', async () => {
+      const clock = sinon.useFakeTimers();
+      const transport = makeTransport();
+
+      try {
+        webex.logger.config.separateLogBuffers = true;
+        webex.logger.config.clientName = 'client';
+        webex.logger.registerTransports([transport]);
+        webex.logger.client_info('client first');
+        webex.logger.info('sdk second');
+
+        const legacyLines = webex.logger.formatLogs().split('\n');
+
+        await webex.logger.flushTransport(transport);
+        const records = transport.send.firstCall.args[0];
+
+        assert.deepEqual(records.map(({body}) => body), legacyLines);
+        assert.deepEqual(records.map(({source}) => source), ['sdk', 'client']);
+        assert.deepEqual(records.map(({sequence}) => sequence), [2, 1]);
+      } finally {
+        clock.restore();
+      }
+    });
+
+    it('honors the estimated byte limit while always exporting one record', async () => {
+      const transport = makeTransport();
+
+      webex.logger.registerTransports([transport]);
+      webex.logger.info('one');
+      webex.logger.info('two');
+
+      const first = await webex.logger.flushTransport(transport, {maxEstimatedBytes: 1});
+      const second = await webex.logger.flushTransport(transport, {maxEstimatedBytes: 1});
+
+      assert.deepEqual(first, {exported: 1, remaining: 1, dropped: 0});
+      assert.deepEqual(second, {exported: 1, remaining: 0, dropped: 0});
+      assert.lengthOf(transport.send.firstCall.args[0], 1);
+      assert.lengthOf(transport.send.secondCall.args[0], 1);
+    });
+
+    it('maintains independent progress for each transport', async () => {
+      const firstTransport = makeTransport();
+      const secondTransport = makeTransport();
+
+      webex.logger.registerTransports([firstTransport, secondTransport]);
+      webex.logger.info('one');
+      await webex.logger.flushTransport(firstTransport);
+      await webex.logger.flushTransport(secondTransport);
+      webex.logger.info('two');
+      await webex.logger.flushTransport(firstTransport);
+      await webex.logger.flushTransport(secondTransport);
+
+      assert.deepEqual(
+        firstTransport.send.getCalls().map((call) => call.args[0].map(({sequence}) => sequence)),
+        [[1], [2]]
+      );
+      assert.deepEqual(
+        secondTransport.send.getCalls().map((call) => call.args[0].map(({sequence}) => sequence)),
+        [[1], [2]]
+      );
+    });
+
+    it('retries the same records after synchronous and asynchronous send failures', async () => {
+      const synchronousTransport = makeTransport(
+        sinon.stub().onFirstCall().throws(new Error('sync failure')).resolves()
+      );
+      const asynchronousTransport = makeTransport(
+        sinon.stub().onFirstCall().rejects(new Error('async failure')).resolves()
+      );
+
+      webex.logger.registerTransports([synchronousTransport, asynchronousTransport]);
+      webex.logger.info('retry me');
+
+      await assert.isRejected(webex.logger.flushTransport(synchronousTransport), 'sync failure');
+      await webex.logger.flushTransport(synchronousTransport);
+      await assert.isRejected(webex.logger.flushTransport(asynchronousTransport), 'async failure');
+      await webex.logger.flushTransport(asynchronousTransport);
+
+      assert.equal(
+        synchronousTransport.send.firstCall.args[0][0].sequence,
+        synchronousTransport.send.secondCall.args[0][0].sequence
+      );
+      assert.equal(
+        asynchronousTransport.send.firstCall.args[0][0].sequence,
+        asynchronousTransport.send.secondCall.args[0][0].sequence
+      );
+    });
+
+    it('coalesces overlapping flushes and leaves in-flight appends pending', async () => {
+      const deferred = makeDeferred();
+      const transport = makeTransport(sinon.stub().returns(deferred.promise));
+
+      webex.logger.registerTransports([transport]);
+      webex.logger.info('first');
+
+      const firstFlush = webex.logger.flushTransport(transport);
+      const overlappingFlush = webex.logger.flushTransport(transport);
+
+      assert.strictEqual(firstFlush, overlappingFlush);
+      await Promise.resolve();
+      webex.logger.info('second');
+      deferred.resolve();
+
+      assert.deepEqual(await firstFlush, {exported: 1, remaining: 1, dropped: 0});
+      await webex.logger.flushTransport(transport);
+      assert.equal(transport.send.secondCall.args[0][0].sequence, 2);
+    });
+
+    it('reports eviction before selection once', async () => {
+      const transport = makeTransport();
+
+      webex.logger.config.historyLength = 2;
+      webex.logger.registerTransports([transport]);
+      webex.logger.info('one');
+      webex.logger.info('two');
+      webex.logger.info('three');
+
+      assert.deepEqual(await webex.logger.flushTransport(transport), {
+        exported: 2,
+        remaining: 0,
+        dropped: 1,
+      });
+      assert.deepEqual(await webex.logger.flushTransport(transport), {
+        exported: 0,
+        remaining: 0,
+        dropped: 0,
+      });
+    });
+
+    it('reports drops discovered before a failed send on the next successful result', async () => {
+      const transport = makeTransport(
+        sinon.stub().onFirstCall().rejects(new Error('failed')).resolves()
+      );
+
+      webex.logger.config.historyLength = 2;
+      webex.logger.registerTransports([transport]);
+      webex.logger.info('one');
+      webex.logger.info('two');
+      webex.logger.info('three');
+
+      await assert.isRejected(webex.logger.flushTransport(transport), 'failed');
+      assert.deepEqual(await webex.logger.flushTransport(transport), {
+        exported: 2,
+        remaining: 0,
+        dropped: 1,
+      });
+    });
+
+    it('acknowledges selected ends and reports only later drops after in-flight success', async () => {
+      const deferred = makeDeferred();
+      const transport = makeTransport(
+        sinon.stub().onFirstCall().returns(deferred.promise).resolves()
+      );
+
+      webex.logger.config.historyLength = 2;
+      webex.logger.registerTransports([transport]);
+      webex.logger.info('one');
+      webex.logger.info('two');
+      const flush = webex.logger.flushTransport(transport);
+
+      await Promise.resolve();
+      webex.logger.info('three');
+      webex.logger.info('four');
+      webex.logger.info('five');
+      deferred.resolve();
+
+      assert.deepEqual(await flush, {exported: 2, remaining: 2, dropped: 0});
+      assert.deepEqual(await webex.logger.flushTransport(transport), {
+        exported: 2,
+        remaining: 0,
+        dropped: 1,
+      });
+      assert.deepEqual(
+        transport.send.secondCall.args[0].map(({body}) => body.split(',').pop()),
+        ['four', 'five']
+      );
+    });
+
+    it('does not acknowledge and reports all unacknowledged drops after in-flight failure', async () => {
+      const deferred = makeDeferred();
+      const transport = makeTransport(
+        sinon.stub().onFirstCall().returns(deferred.promise).resolves()
+      );
+
+      webex.logger.config.historyLength = 2;
+      webex.logger.registerTransports([transport]);
+      webex.logger.info('one');
+      webex.logger.info('two');
+      const flush = webex.logger.flushTransport(transport);
+
+      await Promise.resolve();
+      webex.logger.info('three');
+      webex.logger.info('four');
+      webex.logger.info('five');
+      deferred.reject(new Error('failed'));
+
+      await assert.isRejected(flush, 'failed');
+      assert.deepEqual(await webex.logger.flushTransport(transport), {
+        exported: 2,
+        remaining: 0,
+        dropped: 3,
+      });
+      assert.deepEqual(
+        transport.send.secondCall.args[0].map(({body}) => body.split(',').pop()),
+        ['four', 'five']
+      );
+    });
+  });
+
   describe('#logToBuffer()', () => {
     it('logs only to buffer by default', () => {
       webex.logger.logToBuffer('sdklog');
