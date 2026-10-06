@@ -1235,6 +1235,25 @@ describe('plugin-logger', () => {
       assert.deepEqual(result, {exported: 2, remaining: 0, dropped: 0});
     });
 
+    it('exports SDK and client buffer-only calls at the intended info level', async () => {
+      const transport = makeTransport();
+
+      webex.logger.config.separateLogBuffers = true;
+      webex.logger.registerTransports([transport]);
+      webex.logger.logToBuffer('sdk buffer only');
+      webex.logger.client_logToBuffer('client buffer only');
+
+      await webex.logger.flushTransport(transport);
+
+      assert.deepEqual(
+        transport.send.firstCall.args[0].map(({level, source}) => ({level, source})),
+        [
+          {level: 'info', source: 'sdk'},
+          {level: 'info', source: 'client'},
+        ]
+      );
+    });
+
     it('bounds, filters, and attaches metadata without printing buffer-only logs', async () => {
       const transport = makeTransport();
       const longValue = 'v'.repeat(300);

@@ -861,18 +861,12 @@ levels.forEach((level) => {
 });
 
 Logger.prototype.client_logToBuffer = makeLoggerMethod(
-  levels.info,
-  levels.info,
+  'info',
+  'info',
   LOG_TYPES.CLIENT,
   true,
   true
 );
-Logger.prototype.logToBuffer = makeLoggerMethod(
-  levels.info,
-  levels.info,
-  LOG_TYPES.SDK,
-  true,
-  true
-);
+Logger.prototype.logToBuffer = makeLoggerMethod('info', 'info', LOG_TYPES.SDK, true, true);
 
 export default Logger;
