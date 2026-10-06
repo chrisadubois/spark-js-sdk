@@ -1,3 +1,5 @@
+export {LLM_PRACTICE_SESSION} from '@webex/internal-plugin-llm';
+
 export const EVENT_TRIGGERS = {
   VOICEA_ANNOUNCEMENT: 'voicea:announcement',
   CAPTION_LANGUAGE_UPDATE: 'voicea:captionLanguageUpdate',
@@ -7,6 +9,7 @@ export const EVENT_TRIGGERS = {
   TRANSCRIBING_OFF: 'voicea:transcribingOff',
 
   NEW_CAPTION: 'voicea:newCaption',
+  SPEAKER_NAME_UPDATED: 'voicea:speakerNameUpdated',
   EVA_COMMAND: 'voicea:wxa',
   HIGHLIGHT_CREATED: 'voicea:highlightCreated',
   NEW_MANUAL_CAPTION: 'aibridge:newManualCaption',
@@ -21,6 +24,7 @@ export const AIBRIDGE_RELAY_TYPES = {
     TRANSLATION_REQUEST: 'voicea.transl.req',
     TRANSLATION_RESPONSE: 'voicea.transl.rsp',
     TRANSCRIPTION: 'voicea.transcription',
+    SPEAKER_NAME_UPDATE: 'voicea.update_speakername',
   },
   MANUAL: {
     TRANSCRIPTION: 'aibridge.manual_transcription',
@@ -44,7 +48,6 @@ export const TRANSCRIPTION_TYPE = {
 
 export const VOICEA = 'voicea';
 export const DEFAULT_SPOKEN_LANGUAGE = 'en';
-export const LLM_PRACTICE_SESSION = 'llm-practice-session';
 
 export const ANNOUNCE_STATUS = {
   IDLE: 'idle',

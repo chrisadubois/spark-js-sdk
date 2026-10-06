@@ -4,13 +4,21 @@ import {Failure, AugmentedError} from './GlobalTypes';
 import LoggerProxy from '../../logger-proxy';
 import WebexRequest from './WebexRequest';
 import {
+  ConsultConferenceData,
+  consultConferencePayloadData,
+  ConsultTransferDestinationType,
   TaskData,
-  ConsultTransferPayLoad,
   CONSULT_TRANSFER_DESTINATION_TYPE,
+  DESTINATION_TYPE,
   Interaction,
+  InteractionParticipant,
 } from '../task/types';
 import {PARTICIPANT_TYPES, STATE_CONSULT} from './constants';
 import {DialPlan} from '../config/types';
+
+/** Returns whether a value is a non-null object with string keys. */
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
 
 /**
  * Extracts common error details from a Webex request payload.
@@ -28,55 +36,68 @@ const getCommonErrorDetails = (errObj: WebexRequestPayload) => {
 };
 
 /**
- * Checks if the destination type represents an entry point variant (EPDN or ENTRYPOINT).
+ * Strips characters defined in the dial plan entry from the input string.
+ *
+ * @param input - The dial number to sanitize
+ * @param strippedChars - String of characters to remove from the input
+ * @returns The sanitized input with specified characters removed
  */
-const isEntryPointOrEpdn = (destAgentType?: string): boolean => {
-  return destAgentType === 'EPDN' || destAgentType === 'ENTRYPOINT';
+export const stripDialPlanChars = (input: string, strippedChars: string): string => {
+  if (!strippedChars) {
+    return input;
+  }
+
+  const charsToStrip = new Set(strippedChars.split(''));
+
+  return input
+    .split('')
+    .filter((c) => !charsToStrip.has(c))
+    .join('');
 };
-
-/**
- * Determines if the task involves dialing a number based on the destination type.
- * Returns 'DIAL_NUMBER' for dial-related destinations, empty string otherwise.
- */
-const getAgentActionTypeFromTask = (taskData?: TaskData): 'DIAL_NUMBER' | '' => {
-  const destAgentType = taskData?.destinationType;
-
-  // Check if destination requires dialing: direct dial number or entry point variants
-  const isDialNumber = destAgentType === 'DN';
-  const isEntryPointVariant = isEntryPointOrEpdn(destAgentType);
-
-  // If the destination type is a dial number or an entry point variant, return 'DIAL_NUMBER'
-  return isDialNumber || isEntryPointVariant ? 'DIAL_NUMBER' : '';
-};
-
-// Fallback regex for US/Canada dial numbers when no dial plan entries are configured
-export const FALLBACK_DIAL_NUMBER_REGEX = /1[0-9]{3}[2-9][0-9]{6}([,]{1,10}[0-9]+){0,1}/;
 
 /**
  * Validates a dial number against the provided dial plan regex patterns.
  * A number is valid if it matches at least one regex pattern in the dial plans.
- * Falls back to US/Canada regex validation if no dial plan entries are configured.
+ * Skips validation when no dial plan entries are configured, deferring to the server.
  *
  * @param input - The dial number to validate
  * @param dialPlanEntries - Array of dial plan entries containing regex patterns
- * @returns true if the input matches at least one dial plan regex pattern, false otherwise
+ * @returns true if the input matches at least one dial plan regex pattern or no entries are configured, false otherwise
  */
 export const isValidDialNumber = (
   input: string,
   dialPlanEntries: DialPlan['dialPlanEntity']
 ): boolean => {
-  if (!dialPlanEntries || dialPlanEntries.length === 0) {
-    LoggerProxy.info('No dial plan entries found. Falling back to US number validation.');
+  if (!input) {
+    LoggerProxy.warn('Dial number is empty or undefined.', {
+      module: 'Utils',
+      method: 'isValidDialNumber',
+    });
 
-    return FALLBACK_DIAL_NUMBER_REGEX.test(input);
+    return false;
+  }
+
+  if (!dialPlanEntries || dialPlanEntries.length === 0) {
+    LoggerProxy.log(
+      'No dial plan entries found. Skipping client-side validation, deferring to server.',
+      {module: 'Utils', method: 'isValidDialNumber'}
+    );
+
+    return true;
   }
 
   return dialPlanEntries.some((entry) => {
     try {
+      const sanitizedInput = stripDialPlanChars(input, entry.strippedChars);
       const regex = new RegExp(entry.regex);
 
-      return regex.test(input);
-    } catch {
+      return regex.test(sanitizedInput);
+    } catch (e) {
+      LoggerProxy.warn(`Failed to validate dial number against entry "${entry.name}": ${e}`, {
+        module: 'Utils',
+        method: 'isValidDialNumber',
+      });
+
       return false;
     }
   });
@@ -243,6 +264,7 @@ export const createErrDetailsObject = (errObj: WebexRequestPayload) => {
   return new Err.Details('Service.reqs.generic.failure', details);
 };
 
+/*
 /**
  * Gets the consulted agent ID from the media object by finding the agent
  * in the consult media participants (excluding the current agent).
@@ -321,9 +343,16 @@ export const calculateDestAgentId = (interaction: Interaction, agentId: string):
     return destAgentIdCBT;
   }
 
-  return interaction.participants[consultingAgent]?.type === PARTICIPANT_TYPES.EP_DN
-    ? interaction.participants[consultingAgent]?.epId
-    : interaction.participants[consultingAgent]?.id;
+  const participant = interaction.participants[consultingAgent];
+  if (!participant) {
+    return '';
+  }
+
+  if (participant.type === PARTICIPANT_TYPES.EP_DN) {
+    return (participant as InteractionParticipant & {epId?: string}).epId ?? '';
+  }
+
+  return participant.id ?? '';
 };
 
 /**
@@ -358,16 +387,77 @@ export const calculateDestType = (interaction: Interaction, agentId: string): st
   return CONSULT_TRANSFER_DESTINATION_TYPE.AGENT;
 };
 
-export const deriveConsultTransferDestinationType = (
-  taskData?: TaskData
-): ConsultTransferPayLoad['destinationType'] => {
-  const agentActionType = getAgentActionTypeFromTask(taskData);
+/**
+ * Gets the destination agent ID from participants.
+ * Finds a participant who is not the current agent and is an agent type.
+ *
+ * @param participants - The participants object from interaction
+ * @param agentId - The current agent's ID
+ * @returns The destination agent ID, or undefined if none found
+ */
+export const buildConsultConferenceParamData = (
+  dataPassed: consultConferencePayloadData,
+  interactionIdPassed: string
+): {interactionId: string; data: ConsultConferenceData} => {
+  const data: ConsultConferenceData = {
+    ...('agentId' in dataPassed && {agentId: dataPassed.agentId}),
+    to: dataPassed.destAgentId,
+    destinationType: '',
+  };
 
-  if (agentActionType === 'DIAL_NUMBER') {
-    return isEntryPointOrEpdn(taskData?.destinationType)
-      ? CONSULT_TRANSFER_DESTINATION_TYPE.ENTRYPOINT
-      : CONSULT_TRANSFER_DESTINATION_TYPE.DIALNUMBER;
+  if ('destinationType' in dataPassed) {
+    const destinationType = String(dataPassed.destinationType || '').trim();
+    const normalizedDestinationType = destinationType.toUpperCase().replace(/[-_\s]/g, '');
+
+    if (normalizedDestinationType === 'DN' || normalizedDestinationType === 'DIALNUMBER') {
+      data.destinationType = DESTINATION_TYPE.DIALNUMBER;
+    } else if (normalizedDestinationType === 'EPDN' || normalizedDestinationType === 'ENTRYPOINT') {
+      data.destinationType = DESTINATION_TYPE.ENTRYPOINT;
+    } else if (normalizedDestinationType === 'QUEUE') {
+      data.destinationType = DESTINATION_TYPE.QUEUE;
+    } else if (normalizedDestinationType === 'AGENT') {
+      data.destinationType = DESTINATION_TYPE.AGENT;
+    } else {
+      data.destinationType = destinationType as ConsultConferenceData['destinationType'];
+    }
+  } else {
+    data.destinationType = DESTINATION_TYPE.AGENT;
   }
 
+  return {
+    interactionId: interactionIdPassed,
+    data,
+  };
+};
+
+/**
+ * Derives the consult transfer destination type based on task data.
+ * This function determines the appropriate destination type for a consult transfer
+ * by examining the destination type stored in the task data.
+ *
+ * @param taskData - The task data containing destination information
+ * @returns The derived consult transfer destination type
+ * @public
+ */
+export const deriveConsultTransferDestinationType = (
+  taskData: TaskData
+): ConsultTransferDestinationType => {
+  const destType = taskData?.destinationType;
+  const normalizedDestType = String(destType || '')
+    .toUpperCase()
+    .replace(/[-_\s]/g, '');
+
+  // Map destination types to consult transfer destination types
+  if (normalizedDestType === 'DN' || normalizedDestType === 'DIALNUMBER') {
+    return CONSULT_TRANSFER_DESTINATION_TYPE.DIALNUMBER;
+  }
+  if (normalizedDestType === 'EPDN' || normalizedDestType === 'ENTRYPOINT') {
+    return CONSULT_TRANSFER_DESTINATION_TYPE.ENTRYPOINT;
+  }
+  if (normalizedDestType === 'QUEUE') {
+    return CONSULT_TRANSFER_DESTINATION_TYPE.QUEUE;
+  }
+
+  // Default to agent if no specific type matches
   return CONSULT_TRANSFER_DESTINATION_TYPE.AGENT;
 };

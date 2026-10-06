@@ -654,7 +654,7 @@ describe('plugin-meetings', () => {
           meetingInfo.createAdhocSpaceMeeting,
           'conversationUrl',
           installedOrgID,
-          null,
+          null
         );
         assert.notCalled(webex.request);
         meetingInfo.createAdhocSpaceMeeting.restore();
@@ -900,6 +900,63 @@ describe('plugin-meetings', () => {
         }
       );
 
+      forEach(
+        [
+          {
+            meetingId: 'meeting-id',
+            sendCAevents: true,
+            correlationId: 'correlation-id',
+            shouldSendCorrelationId: true,
+            condition: 'when CA events are enabled for the meeting',
+          },
+          {
+            sendCAevents: true,
+            correlationId: 'correlation-id',
+            shouldSendCorrelationId: false,
+            condition: 'without a meetingId',
+          },
+          {
+            meetingId: 'meeting-id',
+            sendCAevents: false,
+            correlationId: 'correlation-id',
+            shouldSendCorrelationId: false,
+            condition: 'when CA events are disabled',
+          },
+          {
+            meetingId: 'meeting-id',
+            sendCAevents: true,
+            shouldSendCorrelationId: false,
+            condition: 'without a correlationId',
+          },
+        ],
+        ({meetingId, sendCAevents, correlationId, shouldSendCorrelationId, condition}) => {
+          it(`should ${
+            shouldSendCorrelationId ? '' : 'not '
+          }send the correlationId header ${condition}`, async () => {
+            webex.request.resolves({statusCode: 200, body: {meetingKey: '1234323'}});
+
+            await meetingInfo.fetchMeetingInfo(
+              '1234323',
+              DESTINATION_TYPE.MEETING_ID,
+              null,
+              null,
+              null,
+              null,
+              undefined,
+              {meetingId, sendCAevents, correlationId}
+            );
+
+            const requestOptions = webex.request.firstCall.args[0];
+
+            if (shouldSendCorrelationId) {
+              assert.deepEqual(requestOptions.headers, {correlationId});
+            } else {
+              assert.notProperty(requestOptions, 'headers');
+            }
+          });
+        }
+      );
+
       it('should send CA metric if meetingId is provided and send CA events is authorized', async () => {
         const requestResponse = {
           statusCode: 200,
@@ -1068,13 +1125,16 @@ describe('plugin-meetings', () => {
           await runTest(423006, true);
         });
 
+        it('should throw MeetingInfoV2CaptchaError for 423 response (wbxappapi code 423008)', async () => {
+          await runTest(423008, true);
+        });
+
         it('should throw MeetingInfoV2CaptchaError for 423 response (wbxappapi code 423001)', async () => {
           await runTest(423001, false);
         });
       });
 
       describe('should stop call fetchMeetingInfo if siteFullUrl is empty for 404 response', () => {
-
         const runTest = async (wbxAppApiCode, expectedIsPasswordRequired) => {
           webex.request = sinon.stub().rejects({
             statusCode: 404,
@@ -1082,11 +1142,10 @@ describe('plugin-meetings', () => {
               code: wbxAppApiCode,
               message: 'Alternate Meeting Server',
               data: {
-                'siteFullUrl': ''
-              }
+                siteFullUrl: '',
+              },
             },
           });
-
 
           try {
             await meetingInfo.fetchMeetingInfo('1234323', DESTINATION_TYPE.MEETING_ID, 'abc', {
@@ -1097,7 +1156,7 @@ describe('plugin-meetings', () => {
           } catch (err) {
             assert(Metrics.sendBehavioralMetric.calledOnce);
             assert.deepEqual(err.body.data, {
-              siteFullUrl: ''
+              siteFullUrl: '',
             });
           }
         };
@@ -1106,7 +1165,6 @@ describe('plugin-meetings', () => {
           await runTest(404100, false);
         });
       });
-
 
       it('should throw an error and not fetch with an "empty" body', async () => {
         const body = {supportHostKey: 'foo', supportCountryList: 'bar'};
@@ -1176,7 +1234,11 @@ describe('plugin-meetings', () => {
           body: conversation,
         });
 
-        const result = await meetingInfo.createAdhocSpaceMeeting(conversationUrl, installedOrgID, classificationId);
+        const result = await meetingInfo.createAdhocSpaceMeeting(
+          conversationUrl,
+          installedOrgID,
+          classificationId
+        );
 
         assert.calledWith(webex.request, {
           uri: conversationUrl,
@@ -1210,7 +1272,11 @@ describe('plugin-meetings', () => {
         webex.request = sinon.stub().resolves({
           body: conversation,
         });
-        await meetingInfo.createAdhocSpaceMeeting(conversationUrl, installedOrgID, classificationId);
+        await meetingInfo.createAdhocSpaceMeeting(
+          conversationUrl,
+          installedOrgID,
+          classificationId
+        );
 
         assert.calledWith(webex.request, {
           uri: conversationUrl,
@@ -1282,7 +1348,7 @@ describe('plugin-meetings', () => {
           {errorCode: 423007},
           {errorCode: 403026},
           {errorCode: 403037},
-          {errorCode: 403137},
+          {errorCode: 403106},
         ],
         ({errorCode}) => {
           it(`should throw a MeetingInfoV2JoinWebinarError for error code ${errorCode}`, async () => {

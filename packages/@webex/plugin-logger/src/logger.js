@@ -363,6 +363,7 @@ const Logger = WebexPlugin.extend({
         return {
           buffer: [],
           nextIndex: 0,
+          lastSubmitted: 0,
         };
       },
     },
@@ -379,6 +380,7 @@ const Logger = WebexPlugin.extend({
         return {
           buffer: [],
           nextIndex: 0,
+          lastSubmitted: 0,
         };
       },
     },
@@ -388,6 +390,7 @@ const Logger = WebexPlugin.extend({
         return {
           buffer: [],
           nextIndex: 0,
+          lastSubmitted: 0,
         };
       },
     },
@@ -700,6 +703,34 @@ const Logger = WebexPlugin.extend({
 
     this[`client_${level}`]({[LOG_METHOD_CONTROL]: control}, ...args);
   },
+
+  /**
+   * Update the last submitted index in the buffers to the current nextIndex
+   *
+   * @returns {void}
+   */
+  updateLastSubmittedIndex() {
+    if (this.config.separateLogBuffers) {
+      this.clientBuffer.lastSubmitted = this.clientBuffer.nextIndex;
+      this.sdkBuffer.lastSubmitted = this.sdkBuffer.nextIndex;
+    } else {
+      this.buffer.lastSubmitted = this.buffer.nextIndex;
+    }
+  },
+
+  /**
+   * Reset the nextIndex in the buffers to the last successful upload index, effectively including any logs since the last successful upload in the next upload
+   *
+   * @returns {void}
+   */
+  resetBufferToLastSuccessfulUpload() {
+    if (this.config.separateLogBuffers) {
+      this.clientBuffer.nextIndex = this.clientBuffer.lastSubmitted;
+      this.sdkBuffer.nextIndex = this.sdkBuffer.lastSubmitted;
+    } else {
+      this.buffer.nextIndex = this.buffer.lastSubmitted;
+    }
+  },
 });
 
 /**
@@ -828,6 +859,11 @@ function makeLoggerMethod(level, impl, type, neverPrint = false, alwaysBuffer = 
           bufferRef.nextIndex -= deleteCount;
           if (bufferRef.nextIndex < 0) {
             bufferRef.nextIndex = 0;
+          }
+
+          bufferRef.lastSubmitted -= deleteCount;
+          if (bufferRef.lastSubmitted < 0) {
+            bufferRef.lastSubmitted = 0;
           }
         }
         if (level === 'group') this.groupLevel += 1;

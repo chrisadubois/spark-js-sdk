@@ -115,6 +115,8 @@ describe('plugin-meetings', () => {
         canAttendeeRequestAiAssistantEnabled: null,
         isAttendeeRequestAiAssistantDeclinedAll: null,
         isAnonymizeDisplayNamesEnabled: null,
+        isSupportParticipantList: null,
+        canViewTheParticipantList: null,
 
         ...expected,
       };
@@ -210,6 +212,7 @@ describe('plugin-meetings', () => {
       'showAutoEndMeetingWarning',
       'canDoVideo',
       'canAnnotate',
+      'isSupportParticipantList',
       'canUseVoip',
       'supportHQV',
       'supportHDV',
@@ -236,6 +239,7 @@ describe('plugin-meetings', () => {
       'canAttendeeRequestAiAssistantEnabled',
       'isAttendeeRequestAiAssistantDeclinedAll',
       'isAnonymizeDisplayNamesEnabled',
+      'canViewTheParticipantList',
     ].forEach((key) => {
       it(`get and set for ${key} work as expected`, () => {
         const inMeetingActions = new InMeetingActions();

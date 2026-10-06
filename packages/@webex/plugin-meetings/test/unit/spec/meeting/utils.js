@@ -12,6 +12,7 @@ import * as BrowserDetectionModule from '@webex/plugin-meetings/src/common/brows
 import PasswordError from '@webex/plugin-meetings/src/common/errors/password-error';
 import CaptchaError from '@webex/plugin-meetings/src/common/errors/captcha-error';
 import {ServerRoles} from '@webex/plugin-meetings/src/member/types';
+import {WebexHttpError} from '@webex/webex-core';
 
 describe('plugin-meetings', () => {
   let webex;
@@ -90,7 +91,8 @@ describe('plugin-meetings', () => {
         assert.calledOnceWithExactly(meeting.cleanupLLMConneciton, {throwOnError: false});
         assert.calledOnce(meeting.breakouts.cleanUp);
         assert.calledOnce(meeting.simultaneousInterpretation.cleanUp);
-        assert.calledOnce(meeting.locusInfo.cleanUp);
+        // locusInfo.cleanUp (hash tree parser teardown) is deferred to Meetings#destroy
+        assert.notCalled(meeting.locusInfo.cleanUp);
         assert.calledOnce(webex.internal.device.meetingEnded);
         assert.calledOnceWithExactly(
           meeting.webex.internal.newMetrics.callDiagnosticMetrics.clearEventLimitsForCorrelationId,
@@ -112,7 +114,8 @@ describe('plugin-meetings', () => {
         assert.notCalled(meeting.cleanupLLMConneciton);
         assert.calledOnce(meeting.breakouts.cleanUp);
         assert.calledOnce(meeting.simultaneousInterpretation.cleanUp);
-        assert.calledOnce(meeting.locusInfo.cleanUp);
+        // locusInfo.cleanUp (hash tree parser teardown) is deferred to Meetings#destroy
+        assert.notCalled(meeting.locusInfo.cleanUp);
         assert.calledOnce(webex.internal.device.meetingEnded);
         assert.calledOnceWithExactly(
           meeting.webex.internal.newMetrics.callDiagnosticMetrics.clearEventLimitsForCorrelationId,
@@ -133,7 +136,8 @@ describe('plugin-meetings', () => {
         assert.notCalled(meeting.cleanupLLMConneciton);
         assert.calledOnce(meeting.breakouts.cleanUp);
         assert.calledOnce(meeting.simultaneousInterpretation.cleanUp);
-        assert.calledOnce(meeting.locusInfo.cleanUp);
+        // locusInfo.cleanUp (hash tree parser teardown) is deferred to Meetings#destroy
+        assert.notCalled(meeting.locusInfo.cleanUp);
         assert.calledOnce(webex.internal.device.meetingEnded);
         assert.calledOnceWithExactly(
           meeting.webex.internal.newMetrics.callDiagnosticMetrics.clearEventLimitsForCorrelationId,
@@ -319,6 +323,7 @@ describe('plugin-meetings', () => {
         const addSequenceSpy = sinon.spy(MeetingUtil, 'addSequence');
 
         const meeting = {
+          locusUrl: 'https://locus.example.com/loci/abc',
           request: sinon.stub().returns(Promise.resolve('result')),
         };
 
@@ -326,6 +331,7 @@ describe('plugin-meetings', () => {
 
         const options = {
           some: 'option',
+          uri: 'https://locus.example.com/loci/abc',
           body: {},
         };
 
@@ -339,7 +345,7 @@ describe('plugin-meetings', () => {
         addSequenceSpy.resetHistory();
 
         // body missing from options
-        result = await locusDeltaRequest({});
+        result = await locusDeltaRequest({uri: 'https://locus.example.com/loci/abc'});
         assert.equal(result, 'result');
         assert.calledOnceWithExactly(updateLocusFromApiResponseSpy, meeting, 'result');
         assert.calledOnceWithExactly(addSequenceSpy, meeting, options.body);
@@ -351,6 +357,78 @@ describe('plugin-meetings', () => {
         assert.equal(result, undefined);
 
         WeakRef.prototype.deref.restore();
+      });
+
+      it('calls updateLocusFromApiResponse when request uri starts with the meeting locusUrl', async () => {
+        const updateLocusFromApiResponseSpy = sinon.spy(MeetingUtil, 'updateLocusFromApiResponse');
+
+        const meeting = {
+          locusUrl: 'https://locus.example.com/loci/abc',
+          request: sinon.stub().returns(Promise.resolve('result')),
+        };
+
+        const locusDeltaRequest = MeetingUtil.generateLocusDeltaRequest(meeting);
+
+        const result = await locusDeltaRequest({
+          uri: 'https://locus.example.com/loci/abc/participant/123',
+          body: {},
+        });
+
+        assert.equal(result, 'result');
+        assert.calledOnceWithExactly(updateLocusFromApiResponseSpy, meeting, 'result');
+      });
+
+      it('does not call updateLocusFromApiResponse when request uri does not match the meeting locusUrl', async () => {
+        const updateLocusFromApiResponseSpy = sinon.spy(MeetingUtil, 'updateLocusFromApiResponse');
+
+        const meeting = {
+          locusUrl: 'https://locus.example.com/loci/abc',
+          request: sinon.stub().returns(Promise.resolve('result')),
+        };
+
+        const locusDeltaRequest = MeetingUtil.generateLocusDeltaRequest(meeting);
+
+        const result = await locusDeltaRequest({
+          uri: 'https://locus.example.com/loci/different',
+          body: {},
+        });
+
+        assert.equal(result, 'result');
+        assert.notCalled(updateLocusFromApiResponseSpy);
+      });
+
+      it('does not call updateLocusFromApiResponse when request uri is missing', async () => {
+        const updateLocusFromApiResponseSpy = sinon.spy(MeetingUtil, 'updateLocusFromApiResponse');
+
+        const meeting = {
+          locusUrl: 'https://locus.example.com/loci/abc',
+          request: sinon.stub().returns(Promise.resolve('result')),
+        };
+
+        const locusDeltaRequest = MeetingUtil.generateLocusDeltaRequest(meeting);
+
+        const result = await locusDeltaRequest({body: {}});
+
+        assert.equal(result, 'result');
+        assert.notCalled(updateLocusFromApiResponseSpy);
+      });
+
+      it('does not call updateLocusFromApiResponse when meeting locusUrl is missing', async () => {
+        const updateLocusFromApiResponseSpy = sinon.spy(MeetingUtil, 'updateLocusFromApiResponse');
+
+        const meeting = {
+          request: sinon.stub().returns(Promise.resolve('result')),
+        };
+
+        const locusDeltaRequest = MeetingUtil.generateLocusDeltaRequest(meeting);
+
+        const result = await locusDeltaRequest({
+          uri: 'https://locus.example.com/loci/abc',
+          body: {},
+        });
+
+        assert.equal(result, 'result');
+        assert.notCalled(updateLocusFromApiResponseSpy);
       });
 
       it('calls generateBuildLocusDeltaRequestOptions as expected', () => {
@@ -688,7 +766,15 @@ describe('plugin-meetings', () => {
       });
 
       it('should post client event with error when join fails', async () => {
-        const joinError = new Error('Join failed');
+        const joinError = new WebexHttpError.TooManyRequests({
+          statusCode: 429,
+          body: {message: 'Locus rate limited'},
+          options: {
+            method: 'POST',
+            headers: {},
+            uri: 'https://locus.example.com/locus/api/v1/loci/call',
+          },
+        });
         meeting.meetingRequest.joinMeeting.rejects(joinError);
         meeting.meetingInfo = {meetingLookupUrl: 'test-lookup-url'};
 
@@ -964,6 +1050,55 @@ describe('plugin-meetings', () => {
       it('works as expected', () => {
         assert.deepEqual(MeetingUtil.canMoveToLobby(['MOVE_TO_LOBBY']), true);
         assert.deepEqual(MeetingUtil.canMoveToLobby([]), false);
+      });
+    });
+
+    describe('canViewTheParticipantList', () => {
+      it('returns true when both VIEW_THE_PARTICIPANT_LIST and CAN_VIEW_THE_PARTICIPANT_LIST hints are present and canNotViewTheParticipantList is false', () => {
+        assert.isTrue(
+          MeetingUtil.canViewTheParticipantList(
+            ['VIEW_THE_PARTICIPANT_LIST', 'CAN_VIEW_THE_PARTICIPANT_LIST'],
+            false
+          )
+        );
+      });
+
+      it('returns false when VIEW_THE_PARTICIPANT_LIST hint is missing', () => {
+        assert.isFalse(
+          MeetingUtil.canViewTheParticipantList(['CAN_VIEW_THE_PARTICIPANT_LIST'], false)
+        );
+      });
+
+      it('returns false when CAN_VIEW_THE_PARTICIPANT_LIST hint is missing', () => {
+        assert.isFalse(
+          MeetingUtil.canViewTheParticipantList(['VIEW_THE_PARTICIPANT_LIST'], false)
+        );
+      });
+
+      it('returns false when canNotViewTheParticipantList is true', () => {
+        assert.isFalse(
+          MeetingUtil.canViewTheParticipantList(
+            ['VIEW_THE_PARTICIPANT_LIST', 'CAN_VIEW_THE_PARTICIPANT_LIST'],
+            true
+          )
+        );
+      });
+
+      it('returns false when display hints array is empty', () => {
+        assert.isFalse(MeetingUtil.canViewTheParticipantList([], false));
+      });
+
+      it('returns false when both conditions are violated', () => {
+        assert.isFalse(MeetingUtil.canViewTheParticipantList([], true));
+      });
+
+      it('returns true when canNotViewTheParticipantList is undefined (not yet set on meeting)', () => {
+        assert.isTrue(
+          MeetingUtil.canViewTheParticipantList(
+            ['VIEW_THE_PARTICIPANT_LIST', 'CAN_VIEW_THE_PARTICIPANT_LIST'],
+            undefined
+          )
+        );
       });
     });
 
@@ -1289,12 +1424,16 @@ describe('plugin-meetings', () => {
         MeetingUtil.parseInterpretationInfo(meeting, meetingInfo);
         assert.calledWith(meeting.simultaneousInterpretation.updateMeetingSIEnabled, true, true);
         assert.calledWith(meeting.simultaneousInterpretation.updateHostSIEnabled, true);
-        assert.calledWith(meeting.simultaneousInterpretation.updateInterpretation, {
-          siLanguages: [
-            {languageName: 'en', languageCode: 1},
-            {languageName: 'es', languageCode: 2},
-          ],
-        });
+        assert.calledWith(
+          meeting.simultaneousInterpretation.updateInterpretation,
+          {
+            siLanguages: [
+              {languageName: 'en', languageCode: 1},
+              {languageName: 'es', languageCode: 2},
+            ],
+          },
+          {preserveSiEnabled: true}
+        );
       });
 
       it('should update simultaneous interpretation settings with host SI disabled', () => {
@@ -1303,12 +1442,16 @@ describe('plugin-meetings', () => {
         MeetingUtil.parseInterpretationInfo(meeting, meetingInfo);
         assert.calledWith(meeting.simultaneousInterpretation.updateMeetingSIEnabled, true, false);
         assert.calledWith(meeting.simultaneousInterpretation.updateHostSIEnabled, false);
-        assert.calledWith(meeting.simultaneousInterpretation.updateInterpretation, {
-          siLanguages: [
-            {languageName: 'en', languageCode: 1},
-            {languageName: 'es', languageCode: 2},
-          ],
-        });
+        assert.calledWith(
+          meeting.simultaneousInterpretation.updateInterpretation,
+          {
+            siLanguages: [
+              {languageName: 'en', languageCode: 1},
+              {languageName: 'es', languageCode: 2},
+            ],
+          },
+          {preserveSiEnabled: true}
+        );
       });
       it('should update simultaneous interpretation settings with SI disabled', () => {
         meetingInfo.turnOnSimultaneousInterpretation = false;

@@ -7,7 +7,7 @@ import {assert} from '@webex/test-helper-chai';
 import sinon from 'sinon';
 import MockWebex from '@webex/test-helper-mock-webex';
 import {Credentials, Token, grantErrors} from '@webex/webex-core';
-import {inBrowser} from '@webex/common';
+import {inBrowser, base64} from '@webex/common';
 import FakeTimers from '@sinonjs/fake-timers';
 import {skipInBrowser} from '@webex/test-helper-mocha';
 import Logger from '@webex/plugin-logger';
@@ -183,6 +183,10 @@ describe('webex-core', () => {
           webex.credentials.buildLoginUrl({state: 'state'});
         }, /if specified, `options.state` must be an object/);
 
+        assert.throws(() => {
+          webex.credentials.buildLoginUrl({state: null});
+        }, /if specified, `options.state` must be an object/);
+
         assert.doesNotThrow(() => {
           webex.credentials.buildLoginUrl({state: {}});
         }, /if specified, `options.state` must be an object/);
@@ -228,6 +232,132 @@ describe('webex-core', () => {
           `${
             process.env.IDBROKER_BASE_URL || 'https://idbroker.webex.com'
           }/idb/oauth2/v1/authorize?client_id=fake&redirect_uri=http%3A%2F%2Fexample.com&scope=scope%3Aone&response_type=code`
+        );
+      });
+    });
+
+    describe('#buildThirdPartyLoginUrl()', () => {
+      it('throws if both `oauth2provider` and `returnURL` are missing', () => {
+        const webex = new MockWebex();
+        const credentials = new Credentials(undefined, {parent: webex});
+
+        webex.trigger('change:config');
+
+        assert.throws(() => {
+          credentials.buildThirdPartyLoginUrl({});
+        }, /`options.oauth2provider` is required/);
+      });
+
+      it('throws if `oauth2provider` is missing', () => {
+        const webex = new MockWebex();
+        const credentials = new Credentials(undefined, {parent: webex});
+
+        webex.trigger('change:config');
+
+        assert.throws(() => {
+          credentials.buildThirdPartyLoginUrl({returnURL: 'https://web.webex.com'});
+        }, /`options.oauth2provider` is required/);
+      });
+
+      it('throws if `returnURL` is missing', () => {
+        const webex = new MockWebex();
+        const credentials = new Credentials(undefined, {parent: webex});
+
+        webex.trigger('change:config');
+
+        assert.throws(() => {
+          credentials.buildThirdPartyLoginUrl({oauth2provider: 'google'});
+        }, /`options.returnURL` is required/);
+      });
+
+      skipInBrowser(it)('generates the third-party login url', () => {
+        const webex = new MockWebex();
+        const credentials = new Credentials(undefined, {parent: webex});
+
+        webex.trigger('change:config');
+
+        assert.equal(
+          credentials.buildThirdPartyLoginUrl({
+            oauth2provider: 'google',
+            returnURL: 'https://web.webex.com',
+          }),
+          `${
+            process.env.IDBROKER_BASE_URL || 'https://idbroker.webex.com'
+          }/idb/ThirdPartyLogin?oauth2provider=google&returnURL=https%3A%2F%2Fweb.webex.com`
+        );
+      });
+
+      skipInBrowser(it)('generates the url with different parameter values', () => {
+        const webex = new MockWebex();
+        const credentials = new Credentials(undefined, {parent: webex});
+
+        webex.trigger('change:config');
+
+        assert.equal(
+          credentials.buildThirdPartyLoginUrl({
+            oauth2provider: 'apple',
+            returnURL: 'https://example.com/callback',
+          }),
+          `${
+            process.env.IDBROKER_BASE_URL || 'https://idbroker.webex.com'
+          }/idb/ThirdPartyLogin?oauth2provider=apple&returnURL=https%3A%2F%2Fexample.com%2Fcallback`
+        );
+      });
+
+      it('throws if `state` is not an object', () => {
+        const webex = new MockWebex();
+        const credentials = new Credentials(undefined, {parent: webex});
+
+        webex.trigger('change:config');
+
+        assert.throws(() => {
+          credentials.buildThirdPartyLoginUrl({
+            oauth2provider: 'google',
+            returnURL: 'https://web.webex.com',
+            state: 'not-an-object',
+          });
+        }, /`options.state` must be an object/);
+      });
+
+      skipInBrowser(it)('omits `state` when an empty object is provided', () => {
+        const webex = new MockWebex();
+        const credentials = new Credentials(undefined, {parent: webex});
+
+        webex.trigger('change:config');
+
+        const result = credentials.buildThirdPartyLoginUrl({
+          oauth2provider: 'google',
+          returnURL: 'https://web.webex.com',
+          state: {},
+        });
+
+        const parsed = new URL(result);
+
+        assert.isFalse(parsed.searchParams.has('state'));
+      });
+
+      skipInBrowser(it)('base64url-encodes a non-empty `state` and emits it as a top-level query param', () => {
+        const webex = new MockWebex();
+        const credentials = new Credentials(undefined, {parent: webex});
+
+        webex.trigger('change:config');
+
+        const result = credentials.buildThirdPartyLoginUrl({
+          oauth2provider: 'google',
+          returnURL: 'https://web.webex.com',
+          state: {csrf_token: 'abc', popUpSignIn: true},
+        });
+
+        // Literal base64url of '{"csrf_token":"abc","popUpSignIn":true}'
+        const expectedState = 'eyJjc3JmX3Rva2VuIjoiYWJjIiwicG9wVXBTaWduSW4iOnRydWV9';
+
+        assert.equal(
+          result,
+          `${
+            process.env.IDBROKER_BASE_URL || 'https://idbroker.webex.com'
+          }/idb/ThirdPartyLogin?oauth2provider=google&returnURL=${encodeURIComponent(
+            'https://web.webex.com'
+          )}&state=${expectedState}`
         );
       });
     });
@@ -368,10 +498,94 @@ describe('webex-core', () => {
       });
 
       it('should throw when provided an invalid token', () =>
-        expect(() => credentials.extractOrgIdFromUserToken()).toThrow('the provided token is not a valid format, token has 1 sections'));
+        expect(() => credentials.extractOrgIdFromUserToken()).toThrow(
+          'the provided token is not a valid format, token has 1 sections'
+        ));
 
       it('should throw when no token is provided', () =>
         expect(() => credentials.extractOrgIdFromUserToken()).toThrow());
+    });
+
+    describe('#extractUserIdFromToken()', () => {
+      let credentials;
+      let webex;
+
+      beforeEach(() => {
+        webex = new MockWebex();
+        credentials = new Credentials(undefined, {parent: webex});
+      });
+
+      const buildToken = (payload) =>
+        `header.${base64.toBase64Url(JSON.stringify(payload))}.signature`;
+
+      it('should return the cis_uuid from the provided token', () => {
+        const token = buildToken({cis_uuid: 'my-user-id'});
+
+        assert.equal(credentials.extractUserIdFromToken(token), 'my-user-id');
+      });
+
+      it('should throw if the token does not contain a cis_uuid', () => {
+        const token = buildToken({foo: 'bar'});
+
+        expect(() => credentials.extractUserIdFromToken(token)).toThrow(
+          'the provided token does not contain a user ID'
+        );
+      });
+
+      it('should throw when provided an unparseable token', () =>
+        expect(() => credentials.extractUserIdFromToken('not-a-valid-token')).toThrow());
+
+      it('should throw when no token is provided', () =>
+        expect(() => credentials.extractUserIdFromToken()).toThrow());
+    });
+
+    describe('#getUserId()', () => {
+      let credentials;
+      let webex;
+
+      const buildToken = (userId) =>
+        `header.${base64.toBase64Url(JSON.stringify({cis_uuid: userId}))}.signature`;
+
+      beforeEach(() => {
+        webex = new MockWebex();
+        credentials = new Credentials(undefined, {parent: webex});
+      });
+
+      it('should return the userId from the supertoken', () => {
+        credentials.supertoken = makeToken(webex, {
+          access_token: buildToken('supertoken-user-id'),
+        });
+
+        assert.equal(credentials.getUserId(), 'supertoken-user-id');
+      });
+
+      it('should fall back to a user token when the supertoken has no userId', () => {
+        credentials.supertoken = makeToken(webex, {access_token: 'AT'});
+        credentials.userTokens.add(
+          makeToken(webex, {access_token: buildToken('user-token-user-id'), scope: 'scope1'})
+        );
+
+        assert.equal(credentials.getUserId(), 'user-token-user-id');
+      });
+
+      it('should prefer the supertoken over the user tokens', () => {
+        credentials.supertoken = makeToken(webex, {
+          access_token: buildToken('supertoken-user-id'),
+        });
+        credentials.userTokens.add(
+          makeToken(webex, {access_token: buildToken('user-token-user-id'), scope: 'scope1'})
+        );
+
+        assert.equal(credentials.getUserId(), 'supertoken-user-id');
+      });
+
+      it('should throw if no available token contains a userId', () => {
+        credentials.supertoken = makeToken(webex, {access_token: 'AT'});
+
+        expect(() => credentials.getUserId()).toThrow(
+          'could not extract the user ID from any available token'
+        );
+      });
     });
 
     describe('#initialize()', () => {
@@ -495,6 +709,37 @@ describe('webex-core', () => {
         webex.trigger('change:config');
 
         assert.isUndefined(credentials.refreshTimer);
+      });
+    });
+
+    describe('#getClientToken()', () => {
+      it('requests a client token without bypassing catalog URL validation', async () => {
+        const webex = new MockWebex();
+        const credentials = new Credentials(undefined, {parent: webex});
+        const uri = 'https://idbroker.webex.com/idb/oauth2/v1/access_token';
+        const scope = 'spark:all';
+
+        webex.request.resolves({body: {access_token: 'AT', token_type: 'Bearer'}});
+
+        const token = await credentials.getClientToken({uri, scope});
+
+        assert.calledOnceWithExactly(webex.request, {
+          method: 'POST',
+          uri,
+          form: {
+            grant_type: 'client_credentials',
+            scope,
+            self_contained_token: true,
+          },
+          auth: {
+            user: 'fake',
+            pass: 'fake',
+            sendImmediately: true,
+          },
+          shouldRefreshAccessToken: false,
+        });
+        assert.instanceOf(token, Token);
+        assert.equal(token.access_token, 'AT');
       });
     });
 
@@ -798,7 +1043,6 @@ describe('webex-core', () => {
           )
           .then(() => assert.isRejected(webex.boundedStorage.get('Credentials', '@'), /NotFound/));
       });
-
 
       // it('does not induce any token refreshes');
 

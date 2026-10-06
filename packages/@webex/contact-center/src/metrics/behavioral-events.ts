@@ -313,6 +313,104 @@ const eventTaxonomyMap: Record<string, BehavioralEventTaxonomy> = {
     target: 'task_outdial',
     verb: 'fail',
   },
+  [METRIC_EVENT_NAMES.WXAPP_TASK_MUTE_SUCCESS]: {
+    product,
+    agent: 'user',
+    target: 'task_mute_webex_together',
+    verb: 'complete',
+  },
+  [METRIC_EVENT_NAMES.WXAPP_TASK_MUTE_FAILED]: {
+    product,
+    agent: 'user',
+    target: 'task_mute_webex_together',
+    verb: 'fail',
+  },
+  [METRIC_EVENT_NAMES.WXAPP_TASK_DTMF_SUCCESS]: {
+    product,
+    agent: 'user',
+    target: 'task_dtmf_webex_together',
+    verb: 'complete',
+  },
+  [METRIC_EVENT_NAMES.WXAPP_TASK_DTMF_FAILED]: {
+    product,
+    agent: 'user',
+    target: 'task_dtmf_webex_together',
+    verb: 'fail',
+  },
+
+  // Webex Together (wxApp)
+  [METRIC_EVENT_NAMES.WXAPP_TASK_ACCEPT_SUCCESS]: {
+    product,
+    agent: 'user',
+    target: 'task_accept_webex_together',
+    verb: 'complete',
+  },
+  [METRIC_EVENT_NAMES.WXAPP_TASK_ACCEPT_FAILED]: {
+    product,
+    agent: 'user',
+    target: 'task_accept_webex_together',
+    verb: 'fail',
+  },
+  [METRIC_EVENT_NAMES.WXAPP_TASK_DECLINE_SUCCESS]: {
+    product,
+    agent: 'user',
+    target: 'task_reject_webex_together',
+    verb: 'complete',
+  },
+  [METRIC_EVENT_NAMES.WXAPP_TASK_DECLINE_FAILED]: {
+    product,
+    agent: 'user',
+    target: 'task_reject_webex_together',
+    verb: 'fail',
+  },
+  [METRIC_EVENT_NAMES.WXAPP_SESSION_INIT_SUCCESS]: {
+    product,
+    agent: 'user',
+    target: 'webex_together_session_init',
+    verb: 'complete',
+  },
+  [METRIC_EVENT_NAMES.WXAPP_SESSION_INIT_FAILED]: {
+    product,
+    agent: 'user',
+    target: 'webex_together_session_init',
+    verb: 'fail',
+  },
+  [METRIC_EVENT_NAMES.WXAPP_SESSION_SKIPPED]: {
+    product,
+    agent: 'user',
+    target: 'webex_together_session_init',
+    verb: 'ignore',
+  },
+  [METRIC_EVENT_NAMES.WXAPP_USERSUB_PUBLISH_SUCCESS]: {
+    product,
+    agent: 'user',
+    target: 'webex_together_usersub_publish',
+    verb: 'complete',
+  },
+  [METRIC_EVENT_NAMES.WXAPP_USERSUB_PUBLISH_FAILED]: {
+    product,
+    agent: 'user',
+    target: 'webex_together_usersub_publish',
+    verb: 'fail',
+  },
+  [METRIC_EVENT_NAMES.WXAPP_MERCURY_SUBSCRIBE_SUCCESS]: {
+    product,
+    agent: 'user',
+    target: 'webex_together_mercury_subscribe',
+    verb: 'complete',
+  },
+  [METRIC_EVENT_NAMES.WXAPP_MERCURY_SUBSCRIBE_FAILED]: {
+    product,
+    agent: 'user',
+    target: 'webex_together_mercury_subscribe',
+    verb: 'fail',
+  },
+  [METRIC_EVENT_NAMES.WXAPP_OFFER_PARTICIPANT_FIELDS_MISSING]: {
+    product,
+    agent: 'user',
+    target: 'webex_together_offer_participant_fields',
+    verb: 'fail',
+  },
 
   // Conference Tasks
   [METRIC_EVENT_NAMES.TASK_CONFERENCE_START_SUCCESS]: {
@@ -349,6 +447,48 @@ const eventTaxonomyMap: Record<string, BehavioralEventTaxonomy> = {
     product,
     agent: 'user',
     target: 'task_conference_transfer',
+    verb: 'fail',
+  },
+
+  // Conference Exit
+  [METRIC_EVENT_NAMES.TASK_CONFERENCE_EXIT_SUCCESS]: {
+    product,
+    agent: 'user',
+    target: 'task_conference_exit',
+    verb: 'complete',
+  },
+  [METRIC_EVENT_NAMES.TASK_CONFERENCE_EXIT_FAILED]: {
+    product,
+    agent: 'user',
+    target: 'task_conference_exit',
+    verb: 'fail',
+  },
+
+  // Conference Participant Drop
+  [METRIC_EVENT_NAMES.TASK_CONFERENCE_PARTICIPANT_DROP_SUCCESS]: {
+    product,
+    agent: 'user',
+    target: 'task_conference_participant_drop',
+    verb: 'complete',
+  },
+  [METRIC_EVENT_NAMES.TASK_CONFERENCE_PARTICIPANT_DROP_FAILED]: {
+    product,
+    agent: 'user',
+    target: 'task_conference_participant_drop',
+    verb: 'fail',
+  },
+
+  // Switch Call
+  [METRIC_EVENT_NAMES.TASK_SWITCH_CALL_SUCCESS]: {
+    product,
+    agent: 'user',
+    target: 'task_switch_call',
+    verb: 'complete',
+  },
+  [METRIC_EVENT_NAMES.TASK_SWITCH_CALL_FAILED]: {
+    product,
+    agent: 'user',
+    target: 'task_switch_call',
     verb: 'fail',
   },
 
@@ -475,6 +615,56 @@ const eventTaxonomyMap: Record<string, BehavioralEventTaxonomy> = {
     product,
     agent: 'user',
     target: 'campaign_preview_remove',
+    verb: 'fail',
+  },
+
+  // User Preference API Events
+  [METRIC_EVENT_NAMES.USER_PREFERENCE_GET_SUCCESS]: {
+    product,
+    agent: 'user',
+    target: 'user_preference_get',
+    verb: 'complete',
+  },
+  [METRIC_EVENT_NAMES.USER_PREFERENCE_GET_FAILED]: {
+    product,
+    agent: 'user',
+    target: 'user_preference_get',
+    verb: 'fail',
+  },
+  [METRIC_EVENT_NAMES.USER_PREFERENCE_CREATE_SUCCESS]: {
+    product,
+    agent: 'user',
+    target: 'user_preference_create',
+    verb: 'complete',
+  },
+  [METRIC_EVENT_NAMES.USER_PREFERENCE_CREATE_FAILED]: {
+    product,
+    agent: 'user',
+    target: 'user_preference_create',
+    verb: 'fail',
+  },
+  [METRIC_EVENT_NAMES.USER_PREFERENCE_UPDATE_SUCCESS]: {
+    product,
+    agent: 'user',
+    target: 'user_preference_update',
+    verb: 'complete',
+  },
+  [METRIC_EVENT_NAMES.USER_PREFERENCE_UPDATE_FAILED]: {
+    product,
+    agent: 'user',
+    target: 'user_preference_update',
+    verb: 'fail',
+  },
+  [METRIC_EVENT_NAMES.USER_PREFERENCE_DELETE_SUCCESS]: {
+    product,
+    agent: 'user',
+    target: 'user_preference_delete',
+    verb: 'complete',
+  },
+  [METRIC_EVENT_NAMES.USER_PREFERENCE_DELETE_FAILED]: {
+    product,
+    agent: 'user',
+    target: 'user_preference_delete',
     verb: 'fail',
   },
 };

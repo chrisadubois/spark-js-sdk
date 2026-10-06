@@ -1,4 +1,4 @@
- // @ts-nocheck
+// @ts-nocheck
 /* eslint-disable */
 /*!
  * Copyright (c) 2015-2020 Cisco Systems, Inc. See LICENSE file.
@@ -14,16 +14,13 @@ import querystring from 'querystring';
 import url from 'url';
 import {EventEmitter} from 'events';
 
-import {base64, oneFlight, whileInFlight} from '@webex/common';
+import {decodeState, encodeState, oneFlight, whileInFlight} from '@webex/common';
 import {grantErrors, WebexPlugin} from '@webex/webex-core';
-import {cloneDeep, isEmpty, omit} from 'lodash';
+import {cloneDeep, isEmpty, omit, isObject} from 'lodash';
 import uuid from 'uuid';
 import base64url from 'crypto-js/enc-base64url';
 import CryptoJS from 'crypto-js';
-
-// Necessary to require lodash this way in order to stub
-// methods in the unit test
-const lodash = require('lodash');
+import {getClientAuthenticationOptions} from './config';
 
 const OAUTH2_CSRF_TOKEN = 'oauth2-csrf-token';
 const OAUTH2_CODE_VERIFIER = 'oauth2-code-verifier';
@@ -37,6 +34,18 @@ export const Events = {
    * QR code login events
    */
   qRCodeLogin: 'qRCodeLogin',
+};
+
+/**
+ * Terminal outcomes for the automatic authorization-code exchange performed
+ * during authorization plugin initialization.
+ *
+ * @enum {string}
+ */
+export const InitialAuthorizationCodeGrantOutcomes = {
+  failure: 'failure',
+  notAttempted: 'not_attempted',
+  success: 'success',
 };
 
 /**
@@ -70,6 +79,37 @@ export const Events = {
 const Authorization = WebexPlugin.extend({
   derived: {
     /**
+     * Retains the terminal outcome of the automatic authorization-code exchange
+     * performed during this authorization plugin instance's initialization.
+     *
+     * This historical value does not represent current authorization state,
+     * credentials hydrated from storage, guest authentication, or
+     * authorization-code exchanges requested later on the same SDK instance. It
+     * is not reset by logout. OAuth redirect errors and CSRF validation failures
+     * occur before the exchange, so the value remains not_attempted; these errors
+     * can throw before ready becomes true.
+     *
+     * Calling logout({noRedirect: true}) does not cancel an initialization
+     * exchange already in flight. If that exchange later settles, it can still
+     * update credentials and this retained outcome.
+     *
+     * Interpret only after authorization readiness:
+     * - not_attempted: initialization did not invoke requestAuthorizationCodeGrant()
+     * - success: the initialization exchange fulfilled
+     * - failure: the initialization exchange threw or rejected
+     *
+     * @instance
+     * @memberof AuthorizationBrowserFirstParty
+     * @readonly
+     * @type {string}
+     */
+    initialAuthorizationCodeGrantOutcome: {
+      deps: ['_initialAuthorizationCodeGrantOutcome'],
+      fn() {
+        return this._initialAuthorizationCodeGrantOutcome;
+      },
+    },
+    /**
      * Alias of {@link AuthorizationBrowserFirstParty#isAuthorizing}
      * @instance
      * @memberof AuthorizationBrowserFirstParty
@@ -93,6 +133,14 @@ const Authorization = WebexPlugin.extend({
     isAuthorizing: {
       default: false,
       type: 'boolean',
+    },
+    /**
+     * Internal backing state for the initial authorization-code grant outcome.
+     * @private
+     */
+    _initialAuthorizationCodeGrantOutcome: {
+      default: InitialAuthorizationCodeGrantOutcomes.notAttempted,
+      type: 'string',
     },
     /**
      * Indicates that the plugin has finished any automatic startup
@@ -199,7 +247,7 @@ const Authorization = WebexPlugin.extend({
 
     // Decode and parse state object (if present)
     if (location.query.state) {
-      location.query.state = JSON.parse(base64.decode(location.query.state));
+      location.query.state = decodeState(location.query.state);
     } else {
       location.query.state = {};
     }
@@ -233,7 +281,13 @@ const Authorization = WebexPlugin.extend({
         .collectPreauthCatalog(preauthCatalogParams)
         .catch(() => Promise.resolve()) // Non-fatal if catalog collection fails
         .then(() => this.requestAuthorizationCodeGrant({code, codeVerifier}))
+        .then(() => {
+          this._initialAuthorizationCodeGrantOutcome =
+            InitialAuthorizationCodeGrantOutcomes.success;
+        })
         .catch((error) => {
+          this._initialAuthorizationCodeGrantOutcome =
+            InitialAuthorizationCodeGrantOutcomes.failure;
           this.logger.warn('authorization: failed initial authorization code grant request', error);
         })
         .then(() => {
@@ -267,7 +321,7 @@ const Authorization = WebexPlugin.extend({
       eventType: 'initiateLogin',
       data: {
         hasEmail: !!options.email,
-        hasState: !!options.state
+        hasState: !!options.state,
       },
     });
 
@@ -316,7 +370,7 @@ const Authorization = WebexPlugin.extend({
 
     this.eventEmitter.emit(Events.login, {
       eventType: 'redirectToLoginUrl',
-      data: { loginUrl },
+      data: {loginUrl},
     });
 
     if (options?.separateWindow) {
@@ -341,6 +395,97 @@ const Authorization = WebexPlugin.extend({
     }
 
     return Promise.resolve();
+  },
+
+  /**
+   * Initiates third-party (social provider) login. Generates a CSRF token,
+   * embeds it in `options.state.csrf_token`, and delegates to
+   * `initiateThirdPartyLoginRedirect` for navigation.
+   *
+   * @instance
+   * @memberof AuthorizationBrowserFirstParty
+   * @param {Object} options
+   * @param {string} options.oauth2provider
+   * @param {string} options.returnURL
+   * @param {Object} [options.state] - Caller-supplied state object. Merged
+   *   with the generated `csrf_token`.
+   * @returns {Promise<void>}
+   */
+  initiateThirdPartyLogin(options = {}) {
+    options = cloneDeep(options);
+    if (options.state !== undefined && !isObject(options.state)) {
+      throw new Error('if specified, `options.state` must be an object');
+    }
+    options.state = options.state || {};
+    options.state.csrf_token = this._generateSecurityToken();
+
+    return this.initiateThirdPartyLoginRedirect(options);
+  },
+
+  /**
+   * Performs the navigation step of the third-party login flow. Builds the
+   * IdBroker URL via `Credentials#buildThirdPartyLoginUrl` and assigns it
+   * to `getWindow().location`.
+   *
+   * Mirrors `initiateAuthorizationCodeGrant` for the `/authorize` flow.
+   * Consumers may override this method for custom navigation handling
+   * (e.g. postMessage in iframed contexts).
+   *
+   * @instance
+   * @memberof AuthorizationBrowserFirstParty
+   * @param {Object} options
+   * @param {string} options.oauth2provider
+   * @param {string} options.returnURL
+   * @returns {Promise<void>}
+   */
+  initiateThirdPartyLoginRedirect(options = {}) {
+    this.logger.info('authorization: initiating third-party login redirect');
+
+    try {
+      const url = this.webex.credentials.buildThirdPartyLoginUrl(options);
+
+      this.webex.getWindow().location = url;
+    } catch (err) {
+      return Promise.reject(err);
+    }
+
+    return Promise.resolve();
+  },
+
+  /**
+   * Handles the third-party (social provider) login callback. Reads the
+   * current `window.location`, decodes `state`, validates the CSRF token
+   * (`state.csrf_token`), scrubs sensitive parameters from the URL via
+   * `_cleanUrl`, and returns the parsed payload.
+   *
+   * Mirrors `initialize()` in always operating on the live
+   * `window.location`
+   *
+   * `idToken` is single-use: it is parsed out of the URL exactly once and
+   * the calling client is expected to exchange it (or discard it)
+   * immediately. The returned `state` has `csrf_token` removed.
+   *
+   * @instance
+   * @memberof AuthorizationBrowserFirstParty
+   * @returns {{idToken: string|undefined, email: string|undefined,
+   *   error: string|undefined, state: Object}}
+   */
+  handleThirdPartyCallback() {
+    const location = url.parse(this.webex.getWindow().location.href, true);
+
+    location.query.state = decodeState(location.query.state || 'e30');
+
+    this._verifySecurityToken(location.query, {requireMatch: true});
+    this._cleanUrl(location);
+
+    const {
+      id_token: idToken,
+      email,
+      error,
+      state: {csrf_token, ...state},
+    } = location.query;
+
+    return {idToken, email, error, state};
   },
 
   /**
@@ -400,16 +545,15 @@ const Authorization = WebexPlugin.extend({
       form.code_verifier = options.codeVerifier;
     }
 
+    const {form: clientForm = {}, ...clientAuthentication} =
+      getClientAuthenticationOptions(this.config);
+
     return this.webex
       .request({
         method: 'POST',
         uri: this.config.tokenUrl,
-        form,
-        auth: {
-          user: this.config.client_id,
-          pass: this.config.client_secret,
-          sendImmediately: true,
-        },
+        form: {...form, ...clientForm},
+        ...clientAuthentication,
         shouldRefreshAccessToken: false, // This is the token acquisition call itself
       })
       .then((res) => {
@@ -497,10 +641,11 @@ const Authorization = WebexPlugin.extend({
       })
       .then((res) => {
         const {user_code, verification_uri, verification_uri_complete} = res.body;
-        const verificationUriComplete = this._generateQRCodeVerificationUrl(verification_uri_complete);
+        const verificationUriComplete =
+          this._generateQRCodeVerificationUrl(verification_uri_complete);
         this.eventEmitter.emit(Events.qRCodeLogin, {
           eventType: 'getUserCodeSuccess',
-            userData: {
+          userData: {
             userCode: user_code,
             verificationUri: verification_uri,
             verificationUriComplete,
@@ -591,7 +736,7 @@ const Authorization = WebexPlugin.extend({
           // If polling canceled (id changed), ignore this response
           if (this.currentPollingId !== this.pollingId) return;
 
-            this.eventEmitter.emit(Events.qRCodeLogin, {
+          this.eventEmitter.emit(Events.qRCodeLogin, {
             eventType: 'authorizationSuccess',
             data: res.body,
           });
@@ -703,8 +848,9 @@ const Authorization = WebexPlugin.extend({
    * - HTTP referrer headers to third-party content
    *
    * Approach:
-   * - Remove 'code'.
-   * - Remove 'state' entirely if only contained csrf_token.
+   * - Remove 'code' (OAuth code-grant), 'id_token', and 'email'
+   *   (third-party callback).
+   * - Remove 'state' entirely if it only contained csrf_token.
    * - Else, re-encode remaining state fields (minus csrf_token).
    * - Replace current history entry (no page reload).
    *
@@ -718,12 +864,12 @@ const Authorization = WebexPlugin.extend({
     location = cloneDeep(location);
     if (this.webex.getWindow().history && this.webex.getWindow().history.replaceState) {
       Reflect.deleteProperty(location.query, 'code');
+      Reflect.deleteProperty(location.query, 'id_token');
+      Reflect.deleteProperty(location.query, 'email');
       if (isEmpty(omit(location.query.state, 'csrf_token'))) {
         Reflect.deleteProperty(location.query, 'state');
       } else {
-        location.query.state = base64.encode(
-          JSON.stringify(omit(location.query.state, 'csrf_token'))
-        );
+        location.query.state = encodeState(omit(location.query.state, 'csrf_token'));
       }
       location.search = querystring.stringify(location.query);
       Reflect.deleteProperty(location, 'query');
@@ -737,7 +883,8 @@ const Authorization = WebexPlugin.extend({
    * during authorization code exchange; removes it once consumed.
    *
    * Implementation details:
-   * - Creates a 128 character string using base64url safe alphabet.
+   * - Creates a 128 character string using a cryptographically secure random
+   *   source and the base64url safe alphabet.
    * - Computes SHA256 hash, encodes to base64url (no padding).
    *
    * @instance
@@ -750,10 +897,14 @@ const Authorization = WebexPlugin.extend({
 
     // eslint-disable-next-line no-underscore-dangle
     const safeCharacterMap = base64url._safe_map;
+    const randomValues = new Uint8Array(128);
 
-    const codeVerifier = lodash
-      .times(128, () => safeCharacterMap[lodash.random(0, safeCharacterMap.length - 1)])
-      .join('');
+    this.webex.getWindow().crypto.getRandomValues(randomValues);
+
+    const codeVerifier = Array.from(
+      randomValues,
+      (randomValue) => safeCharacterMap[randomValue & (safeCharacterMap.length - 1)]
+    ).join('');
 
     const codeChallenge = CryptoJS.SHA256(codeVerifier).toString(base64url);
 
@@ -792,27 +943,32 @@ const Authorization = WebexPlugin.extend({
    * - Ensure state + state.csrf_token exist.
    * - Compare values; throw descriptive errors on mismatch / absence.
    *
-   * If no stored token (e.g., user navigated directly), silently returns.
+   * If no stored token (e.g., user navigated directly), silently returns
+   * unless `options.requireMatch` is `true`, in which case absence of a
+   * stored token is treated as a CSRF failure.
    *
    * @instance
    * @memberof AuthorizationBrowserFirstParty
    * @param {Object} query - Parsed query (location.query)
+   * @param {Object} [options]
+   * @param {boolean} [options.requireMatch=false] - When true, throws if
+   *   no stored sessionToken is present.
    * @private
    * @returns {void}
    */
-  _verifySecurityToken(query) {
+  _verifySecurityToken(query, options = {}) {
     const sessionToken = this.webex.getWindow().sessionStorage.getItem(OAUTH2_CSRF_TOKEN);
 
     this.webex.getWindow().sessionStorage.removeItem(OAUTH2_CSRF_TOKEN);
     if (!sessionToken) {
+      if (options.requireMatch) {
+        throw new Error('CSRF token missing from session storage');
+      }
+
       return;
     }
 
-    if (!query.state) {
-      throw new Error(`Expected CSRF token ${sessionToken}, but not found in redirect query`);
-    }
-
-    if (!query.state.csrf_token) {
+    if (!query.state?.csrf_token) {
       throw new Error(`Expected CSRF token ${sessionToken}, but not found in redirect query`);
     }
 

@@ -17,6 +17,7 @@ import {
 import {
   AnnouncementPayload,
   CaptionLanguageResponse,
+  SpeakerNameUpdatePayload,
   TranscriptionResponse,
   IVoiceaChannel,
 } from './voicea.types';
@@ -42,7 +43,7 @@ export class VoiceaChannel extends WebexPlugin implements IVoiceaChannel {
 
   private captionStatus: string;
 
-  private isCaptionBoxOn: boolean;
+  private keepTranscriptionSubscribed: boolean;
 
   private toggleManualCaptionStatus: string;
 
@@ -70,6 +71,9 @@ export class VoiceaChannel extends WebexPlugin implements IVoiceaChannel {
         break;
       case AIBRIDGE_RELAY_TYPES.VOICEA.TRANSCRIPTION:
         this.processTranscription(e.data.voiceaPayload);
+        break;
+      case AIBRIDGE_RELAY_TYPES.VOICEA.SPEAKER_NAME_UPDATE:
+        this.processSpeakerNameUpdate(e.data.voiceaPayload);
         break;
       case AIBRIDGE_RELAY_TYPES.MANUAL.TRANSCRIPTION:
       case AIBRIDGE_RELAY_TYPES.MANUAL.CAPTIONER:
@@ -104,7 +108,7 @@ export class VoiceaChannel extends WebexPlugin implements IVoiceaChannel {
    */
   public deregisterEvents() {
     this.areCaptionsEnabled = false;
-    this.isCaptionBoxOn = false;
+    this.keepTranscriptionSubscribed = false;
     this.captionServiceId = undefined;
     // @ts-ignore
     this.webex.internal.llm.off('event:relay.event', this.eventProcessor);
@@ -126,6 +130,7 @@ export class VoiceaChannel extends WebexPlugin implements IVoiceaChannel {
     super(...args);
     this.seqNum = 1;
     this.areCaptionsEnabled = false;
+    this.keepTranscriptionSubscribed = false;
     this.captionServiceId = undefined;
     this.announceStatus = ANNOUNCE_STATUS.IDLE;
     this.captionStatus = TURN_ON_CAPTION_STATUS.IDLE;
@@ -153,6 +158,16 @@ export class VoiceaChannel extends WebexPlugin implements IVoiceaChannel {
         source: transcriptPayload.data_source,
       });
     }
+  };
+
+  /**
+   * Process speaker name update and send alert
+   * @param {SpeakerNameUpdatePayload} voiceaPayload
+   * @returns {void}
+   */
+  private processSpeakerNameUpdate = (voiceaPayload: SpeakerNameUpdatePayload): void => {
+    // @ts-ignore
+    this.trigger(EVENT_TRIGGERS.SPEAKER_NAME_UPDATED, voiceaPayload);
   };
 
   /**
@@ -275,7 +290,7 @@ export class VoiceaChannel extends WebexPlugin implements IVoiceaChannel {
     // @ts-ignore
     this.webex.internal.llm.isConnected(LLM_PRACTICE_SESSION);
 
-  public getIsCaptionBoxOn = (): boolean => this.isCaptionBoxOn;
+  public getKeepTranscriptionSubscribed = (): boolean => this.keepTranscriptionSubscribed;
 
   /**
    * Resolves the active LLM publish transport, preferring the practice-session
@@ -308,10 +323,11 @@ export class VoiceaChannel extends WebexPlugin implements IVoiceaChannel {
     socket.send({
       id: `${this.seqNum}`,
       type: 'publishRequest',
-      recipients: {
-        // @ts-ignore
-        route: binding,
-      },
+      recipients: [
+        {
+          route: binding,
+        },
+      ],
       // If captionServiceId exists, send it as the 'to' header; otherwise keep headers empty.
       headers: this.captionServiceId ? {to: this.captionServiceId} : {},
       data: {
@@ -366,10 +382,11 @@ export class VoiceaChannel extends WebexPlugin implements IVoiceaChannel {
     socket.send({
       id: `${this.seqNum}`,
       type: 'publishRequest',
-      recipients: {
-        // @ts-ignore
-        route: binding,
-      },
+      recipients: [
+        {
+          route: binding,
+        },
+      ],
       headers: {
         to: this.captionServiceId,
       },
@@ -411,10 +428,11 @@ export class VoiceaChannel extends WebexPlugin implements IVoiceaChannel {
     socket?.send({
       id: `${this.seqNum}`,
       type: 'publishRequest',
-      recipients: {
-        // @ts-ignore
-        route: binding,
-      },
+      recipients: [
+        {
+          route: binding,
+        },
+      ],
       headers: {},
       data: {
         eventType: 'relay.event',
@@ -670,13 +688,14 @@ export class VoiceaChannel extends WebexPlugin implements IVoiceaChannel {
   };
 
   /**
-   * Syncs the UI caption intent and updates transcription subchannel
-   * subscriptions accordingly.
+   * Updates transcription subchannel subscriptions and records whether the
+   * transcription subscription should be kept (and restored on reconnect).
    *
    * @param {Object} [options] - Subscription options.
    * @param {string[]} [options.subscribe] - Subchannels to subscribe to.
    * @param {string[]} [options.unsubscribe] - Subchannels to unsubscribe from.
-   * @param {boolean} [isCaptionBoxOn=false] - Whether captions are intended to be enabled.
+   * @param {boolean} [keepSubscribed=false] - Whether the transcription
+   * subscription should be kept and restored on reconnect.
    *
    * @returns {Promise<void>}
    */
@@ -685,9 +704,9 @@ export class VoiceaChannel extends WebexPlugin implements IVoiceaChannel {
       subscribe?: string[];
       unsubscribe?: string[];
     } = {},
-    isCaptionBoxOn = false
+    keepSubscribed = false
   ): Promise<void> => {
-    this.isCaptionBoxOn = isCaptionBoxOn;
+    this.keepTranscriptionSubscribed = keepSubscribed;
 
     return this.updateSubchannelSubscriptions(options);
   };

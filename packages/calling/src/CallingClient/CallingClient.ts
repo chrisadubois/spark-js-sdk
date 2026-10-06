@@ -150,7 +150,11 @@ export class CallingClient extends Eventing<CallingClientEventTypes> implements 
     log.setLogger(logLevel, CALLING_CLIENT_FILE);
     validateServiceData(this.serviceData);
 
-    this.callManager = getCallManager(this.webex, this.serviceData.indicator);
+    this.callManager = getCallManager(
+      this.webex,
+      this.serviceData.indicator,
+      this.sdkConfig?.iceGathering
+    );
     this.metricManager = getMetricManager(this.webex, this.serviceData.indicator);
 
     this.mediaEngine = Media;
@@ -228,6 +232,11 @@ export class CallingClient extends Eventing<CallingClientEventTypes> implements 
 
     await this.getMobiusServers();
     if (this.apiRequest.isSocketEnabled()) {
+      this.apiRequest.registerMobiusSocketConnectionListener({
+        onConnected: () => this.emit(CALLING_CLIENT_EVENT_KEYS.MOBIUS_SOCKET_CONNECTED),
+        onDisconnected: (reason) =>
+          this.emit(CALLING_CLIENT_EVENT_KEYS.MOBIUS_SOCKET_DISCONNECTED, {reason}),
+      });
       await this.connectToMobiusSocket();
       this.apiRequest.registerMobiusSocketListener(this.handleMobiusAsyncEvent);
     }
@@ -545,6 +554,10 @@ export class CallingClient extends Eventing<CallingClientEventTypes> implements 
     let clientRegion: string;
     let countryCode: string;
 
+    this.mobiusHost =
+      this.webex.internal.services._serviceUrls?.mobius ||
+      this.webex.internal.services.get(this.webex.internal.services._activeServices.mobius);
+
     if (this.sdkConfig?.discovery?.country && this.sdkConfig?.discovery?.region) {
       log.log('Updating region and country from the SDK config', {
         file: CALLING_CLIENT_FILE,
@@ -552,9 +565,6 @@ export class CallingClient extends Eventing<CallingClientEventTypes> implements 
       });
       clientRegion = this.sdkConfig?.discovery?.region;
       countryCode = this.sdkConfig?.discovery?.country;
-      this.mobiusHost =
-        this.webex.internal.services._serviceUrls?.mobius ||
-        this.webex.internal.services.get(this.webex.internal.services._activeServices.mobius);
     } else {
       log.log('Updating region and country through Region discovery', {
         file: CALLING_CLIENT_FILE,
@@ -575,12 +585,22 @@ export class CallingClient extends Eventing<CallingClientEventTypes> implements 
         }
       );
 
-      for (const mobius of this.mobiusClusters) {
-        if (mobius.host) {
-          this.mobiusHost = `https://${mobius.host}${API_V1}`;
-        } else {
-          this.mobiusHost = mobius as unknown as string;
-        }
+      /* Attempt the Mobius host from the service link first (when available) and then
+       * fall back to the catalog clusters. Duplicate candidates are removed so the same
+       * host is never queried twice.
+       */
+      const candidateHosts = [
+        ...new Set([
+          ...(this.mobiusHost ? [this.mobiusHost] : []),
+          ...this.mobiusClusters.map((mobius) =>
+            mobius.host ? `https://${mobius.host}${API_V1}` : (mobius as unknown as string)
+          ),
+        ]),
+      ];
+
+      for (const host of candidateHosts) {
+        this.mobiusHost = host;
+
         try {
           // eslint-disable-next-line no-await-in-loop
           const response = <WebexRequestPayload>await this.webex.request({
@@ -696,76 +716,34 @@ export class CallingClient extends Eventing<CallingClientEventTypes> implements 
 
     log.info(METHOD_START_MESSAGE, loggerContext);
 
-    if (!this.primaryWssMobiusUris.length && !this.backupWssMobiusUris.length) {
+    if (!this.primaryWssMobiusUris.length) {
       log.warn(
-        'No WSS URIs available from Mobius discovery, skipping socket connection',
+        'No WSS URIs available from Mobius discovery for primary, skipping socket connection',
         loggerContext
       );
 
       return;
     }
 
-    if (this.primaryWssMobiusUris.length) {
-      log.log(
-        `Attempting Mobius socket connection using primary WSS URIs (${this.primaryWssMobiusUris.length} available)`,
-        loggerContext
-      );
+    // Attempt to establish the socket connection with mobius if primary wss urls are present
+    // If wss url is not present for primary/backup, registration will be attempted with http even when feature flag is enabled for mobius socket
+    for (const wssUri of this.primaryWssMobiusUris) {
+      try {
+        log.log(`Trying primary WSS URI: ${wssUri}`, loggerContext);
+        // eslint-disable-next-line no-await-in-loop
+        await this.apiRequest.connectToMobiusSocket(wssUri);
+        log.log(
+          `Successfully connected to Mobius socket on primary WSS URI: ${wssUri}`,
+          loggerContext
+        );
 
-      for (const wssUri of this.primaryWssMobiusUris) {
-        try {
-          log.log(`Trying primary WSS URI: ${wssUri}`, loggerContext);
-          // eslint-disable-next-line no-await-in-loop
-          await this.apiRequest.connectToMobiusSocket(wssUri);
-          log.log(
-            `Successfully connected to Mobius socket on primary WSS URI: ${wssUri}`,
-            loggerContext
-          );
-
-          return;
-        } catch (err: unknown) {
-          log.warn(`Primary WSS URI connection failed for ${wssUri}: ${err}`, loggerContext);
-        }
+        return;
+      } catch (err: unknown) {
+        log.warn(`Primary WSS URI connection failed for ${wssUri}: ${err}`, loggerContext);
       }
-
-      log.warn('All primary WSS URI connection attempts failed', loggerContext);
-    } else {
-      log.warn('No primary WSS URIs available, skipping to backup', loggerContext);
     }
 
-    if (this.backupWssMobiusUris.length) {
-      log.log(
-        `Attempting Mobius socket connection using backup WSS URIs (${this.backupWssMobiusUris.length} available)`,
-        loggerContext
-      );
-
-      for (const wssUri of this.backupWssMobiusUris) {
-        try {
-          log.log(`Trying backup WSS URI: ${wssUri}`, loggerContext);
-          // eslint-disable-next-line no-await-in-loop
-          await this.apiRequest.connectToMobiusSocket(wssUri);
-          log.log(
-            `Successfully connected to Mobius socket on backup WSS URI: ${wssUri}`,
-            loggerContext
-          );
-
-          return;
-        } catch (err: unknown) {
-          log.warn(`Backup WSS URI connection failed for ${wssUri}: ${err}`, loggerContext);
-        }
-      }
-
-      log.warn('All backup WSS URI connection attempts failed', loggerContext);
-    } else {
-      log.warn('No backup WSS URIs available', loggerContext);
-    }
-
-    // Throwing an error is not required here. Connection will be attempted again during registration if no connection is established.
-    // We might remove this connection attempt logic during optimization since we are anyway going to try to connect to Mobius during
-    // registration and without registration the connection will be closed automatically by the mobius server.
-    log.warn(
-      'All Mobius socket connection attempts exhausted for both primary and backup, continuing without socket',
-      loggerContext
-    );
+    log.warn('All primary WSS URI connection attempts failed', loggerContext);
   }
 
   private handleMobiusAsyncEvent = async (event?: MobiusAsyncEvent) => {
@@ -916,16 +894,25 @@ export class CallingClient extends Eventing<CallingClientEventTypes> implements 
       file: CALLING_CLIENT_FILE,
       method: METHODS.CREATE_LINE,
     });
+    // When the Mobius socket is enabled, fall back to the HTTP URIs per group when that
+    // group has no WSS URL, so registration is still attempted (primary and backup are
+    // resolved independently). When the socket is disabled, always use the HTTP URIs.
+    const socketEnabled = this.apiRequest.isSocketEnabled();
+    const primaryUris =
+      socketEnabled && this.primaryWssMobiusUris.length
+        ? normalizeMobiusUris(this.primaryWssMobiusUris)
+        : this.primaryMobiusUris;
+    const backupUris =
+      socketEnabled && this.backupWssMobiusUris.length
+        ? normalizeMobiusUris(this.backupWssMobiusUris)
+        : this.backupMobiusUris;
+
     const line = new Line(
       this.webex.internal.device.userId,
       this.webex.internal.device.url,
       this.mutex,
-      this.apiRequest.isSocketEnabled()
-        ? normalizeMobiusUris(this.primaryWssMobiusUris)
-        : this.primaryMobiusUris,
-      this.apiRequest.isSocketEnabled()
-        ? normalizeMobiusUris(this.backupWssMobiusUris)
-        : this.backupMobiusUris,
+      primaryUris,
+      backupUris,
       this.getLoggingLevel(),
       this.serviceData,
       this.sdkConfig?.jwe
@@ -1031,6 +1018,17 @@ export class CallingClient extends Eventing<CallingClientEventTypes> implements 
     });
 
     return connectCall;
+  }
+
+  /**
+   * Indicates whether the Mobius WebSocket transport is currently connected.
+   *
+   * The `MOBIUS_SOCKET_CONNECTED` event is emitted during `init()`, so consumers that
+   * subscribe afterwards may miss it; this lets them reconcile the current state. Returns
+   * `false` when the WebSocket transport is not enabled.
+   */
+  public isMobiusSocketConnected(): boolean {
+    return this.apiRequest.isSocketEnabled() && this.apiRequest.isSocketConnected();
   }
 
   /**

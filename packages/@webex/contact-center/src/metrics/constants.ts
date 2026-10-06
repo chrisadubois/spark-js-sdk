@@ -129,20 +129,44 @@ export const METRIC_EVENT_NAMES = {
   TASK_CONFERENCE_END_FAILED: 'Task Conference End Failed',
   TASK_CONFERENCE_TRANSFER_SUCCESS: 'Task Conference Transfer Success',
   TASK_CONFERENCE_TRANSFER_FAILED: 'Task Conference Transfer Failed',
+  TASK_CONFERENCE_EXIT_SUCCESS: 'Task Conference Exit Success',
+  TASK_CONFERENCE_EXIT_FAILED: 'Task Conference Exit Failed',
+  TASK_CONFERENCE_PARTICIPANT_DROP_SUCCESS: 'Task Conference Participant Drop Success',
+  TASK_CONFERENCE_PARTICIPANT_DROP_FAILED: 'Task Conference Participant Drop Failed',
+  TASK_SWITCH_CALL_SUCCESS: 'Task Switch Call Success',
+  TASK_SWITCH_CALL_FAILED: 'Task Switch Call Failed',
 
   TASK_OUTDIAL_SUCCESS: 'Task Outdial Success',
   TASK_OUTDIAL_FAILED: 'Task Outdial Failed',
+
+  WXAPP_TASK_MUTE_SUCCESS: 'WxApp Task Mute Success',
+  WXAPP_TASK_MUTE_FAILED: 'WxApp Task Mute Failed',
+  WXAPP_TASK_DTMF_SUCCESS: 'WxApp Task Dtmf Success',
+  WXAPP_TASK_DTMF_FAILED: 'WxApp Task Dtmf Failed',
+
+  // WxApp Better Together
+  WXAPP_TASK_ACCEPT_SUCCESS: 'WxApp Task Accept Success',
+  WXAPP_TASK_ACCEPT_FAILED: 'WxApp Task Accept Failed',
+  WXAPP_TASK_DECLINE_SUCCESS: 'WxApp Task Decline Success',
+  WXAPP_TASK_DECLINE_FAILED: 'WxApp Task Decline Failed',
+  WXAPP_SESSION_INIT_SUCCESS: 'WxApp Session Init Success',
+  WXAPP_SESSION_INIT_FAILED: 'WxApp Session Init Failed',
+  WXAPP_SESSION_SKIPPED: 'WxApp Session Skipped',
+  WXAPP_USERSUB_PUBLISH_SUCCESS: 'WxApp Usersub Publish Success',
+  WXAPP_USERSUB_PUBLISH_FAILED: 'WxApp Usersub Publish Failed',
+  WXAPP_MERCURY_SUBSCRIBE_SUCCESS: 'WxApp Mercury Subscribe Success',
+  WXAPP_MERCURY_SUBSCRIBE_FAILED: 'WxApp Mercury Subscribe Failed',
+  WXAPP_OFFER_PARTICIPANT_FIELDS_MISSING: 'WxApp Offer Participant Fields Missing',
 
   UPLOAD_LOGS_SUCCESS: 'Upload Logs Success',
   UPLOAD_LOGS_FAILED: 'Upload Logs Failed',
   WEBSOCKET_DEREGISTER_SUCCESS: 'Websocket Deregister Success',
   WEBSOCKET_DEREGISTER_FAIL: 'Websocket Deregister Failed',
 
-  // WebSocket message events
-  WEBSOCKET_EVENT_RECEIVED: 'Websocket Event Received',
-
   AGENT_DEVICE_TYPE_UPDATE_SUCCESS: 'Agent Device Type Update Success',
   AGENT_DEVICE_TYPE_UPDATE_FAILED: 'Agent Device Type Update Failed',
+  // WebSocket message events
+  WEBSOCKET_EVENT_RECEIVED: 'Websocket Event Received',
 
   // EntryPoint API Events
   ENTRYPOINT_FETCH_SUCCESS: 'Entrypoint Fetch Success',
@@ -168,12 +192,33 @@ export const METRIC_EVENT_NAMES = {
   CAMPAIGN_PREVIEW_REMOVE_SUCCESS: 'Campaign Preview Remove Success',
   CAMPAIGN_PREVIEW_REMOVE_FAILED: 'Campaign Preview Remove Failed',
 
-  // AI Assistant transcript events
+  // AI Assistant Transcript events
   AI_ASSISTANT_SEND_EVENT_SUCCESS: 'AI Assistant Send Event Success',
   AI_ASSISTANT_SEND_EVENT_FAILED: 'AI Assistant Send Event Failed',
+  AI_ASSISTANT_GET_REAL_TIME_ASSISTANCE_SUCCESS: 'AI Assistant Get Real Time Assistance Success',
+  AI_ASSISTANT_GET_REAL_TIME_ASSISTANCE_FAILED: 'AI Assistant Get Real Time Assistance Failed',
+  AI_ASSISTANT_SEND_REAL_TIME_ASSISTANCE_USER_ACTION_SUCCESS:
+    'AI Assistant Send Real Time Assistance User Action Success',
+  AI_ASSISTANT_SEND_REAL_TIME_ASSISTANCE_USER_ACTION_FAILED:
+    'AI Assistant Send Real Time Assistance User Action Failed',
   AI_ASSISTANT_FETCH_HISTORIC_TRANSCRIPTS_SUCCESS:
     'AI Assistant Fetch Historic Transcripts Success',
   AI_ASSISTANT_FETCH_HISTORIC_TRANSCRIPTS_FAILED: 'AI Assistant Fetch Historic Transcripts Failed',
+  AI_ASSISTANT_WELLNESS_ACTION_ACCEPTED: 'AI Assistant Wellness Action Accepted',
+  AI_ASSISTANT_WELLNESS_ACTION_FAILED: 'AI Assistant Wellness Action Failed',
+  AI_ASSISTANT_WELLNESS_EVENT_INVALID: 'AI Assistant Wellness Event Invalid',
+  WELLBEING_BREAK_IDLE_CODE_FETCH_SUCCESS: 'Wellbeing Break Idle Code Fetch Success',
+  WELLBEING_BREAK_IDLE_CODE_FETCH_FAILED: 'Wellbeing Break Idle Code Fetch Failed',
+
+  // User Preference API Events
+  USER_PREFERENCE_GET_SUCCESS: 'User Preference Get Success',
+  USER_PREFERENCE_GET_FAILED: 'User Preference Get Failed',
+  USER_PREFERENCE_CREATE_SUCCESS: 'User Preference Create Success',
+  USER_PREFERENCE_CREATE_FAILED: 'User Preference Create Failed',
+  USER_PREFERENCE_UPDATE_SUCCESS: 'User Preference Update Success',
+  USER_PREFERENCE_UPDATE_FAILED: 'User Preference Update Failed',
+  USER_PREFERENCE_DELETE_SUCCESS: 'User Preference Delete Success',
+  USER_PREFERENCE_DELETE_FAILED: 'User Preference Delete Failed',
 } as const;
 
 /**

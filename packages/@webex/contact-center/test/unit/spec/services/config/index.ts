@@ -66,7 +66,6 @@ describe('AgentConfigService', () => {
         method: 'GET',
       });
       expect(result).toEqual(mockResponse.body);
-
       expect(LoggerProxy.info).toHaveBeenCalledWith('Fetching user data using CI', {
         module: CONFIG_FILE_NAME,
         method: 'getUserUsingCI',
@@ -124,7 +123,6 @@ describe('AgentConfigService', () => {
         method: 'GET',
       });
       expect(result).toEqual(mockResponse.body);
-
       expect(LoggerProxy.info).toHaveBeenCalledWith('Fetching desktop profile', {
         module: CONFIG_FILE_NAME,
         method: 'getDesktopProfileById',
@@ -183,7 +181,6 @@ describe('AgentConfigService', () => {
         method: 'GET',
       });
       expect(result).toEqual(mockResponse.body);
-
       expect(LoggerProxy.info).toHaveBeenCalledWith('Fetching list of teams', {
         module: CONFIG_FILE_NAME,
         method: 'getListOfTeams',
@@ -267,7 +264,6 @@ describe('AgentConfigService', () => {
         method: 'GET',
       });
       expect(result).toEqual(mockResponse.body);
-
       expect(LoggerProxy.info).toHaveBeenCalledWith('Fetching list of aux codes', {
         module: CONFIG_FILE_NAME,
         method: 'getListOfAuxCodes',
@@ -495,7 +491,7 @@ describe('AgentConfigService', () => {
       const mockResponse = {
         statusCode: 200,
         body: {
-          realtimeTranscripts: {enable: true},
+          data: [{realtimeTranscripts: {enable: true}}],
         },
       };
       mockWebexRequest.request.mockResolvedValue(mockResponse);
@@ -709,7 +705,101 @@ describe('AgentConfigService', () => {
     });
   });
 
+  describe('getWellbeingBreakIdleCode', () => {
+    it('uses the system-code query and finds the exact code across pages', async () => {
+      (mockWebexRequest.request as jest.Mock)
+        .mockResolvedValueOnce({
+          statusCode: 200,
+          body: {
+            data: [
+              {id: 'other', name: 'Other', active: true, isSystemCode: true, defaultCode: false},
+            ],
+            meta: {totalPages: 2},
+          },
+        })
+        .mockResolvedValueOnce({
+          statusCode: 200,
+          body: {
+            data: [
+              {
+                id: 'wellbeing-code',
+                name: 'WellbeingBreak',
+                active: true,
+                isSystemCode: true,
+                defaultCode: false,
+              },
+            ],
+            meta: {totalPages: 2},
+          },
+        });
+
+      await expect(agentConfigService.getWellbeingBreakIdleCode(mockOrgId)).resolves.toEqual({
+        id: 'wellbeing-code',
+        name: 'WellbeingBreak',
+        isSystem: true,
+        isDefault: false,
+      });
+      expect(mockWebexRequest.request).toHaveBeenNthCalledWith(1, {
+        service: mockWccAPIURL,
+        resource:
+          `organization/${mockOrgId}/v2/auxiliary-code?page=0&pageSize=100` +
+          '&workType=IDLE_CODE&customFilter=isSystemCode==true&desktopProfileFilter=false',
+        method: 'GET',
+      });
+      expect(mockWebexRequest.request).toHaveBeenNthCalledWith(2, {
+        service: mockWccAPIURL,
+        resource:
+          `organization/${mockOrgId}/v2/auxiliary-code?page=1&pageSize=100` +
+          '&workType=IDLE_CODE&customFilter=isSystemCode==true&desktopProfileFilter=false',
+        method: 'GET',
+      });
+    });
+
+    it('rejects when the exact system code is unavailable', async () => {
+      (mockWebexRequest.request as jest.Mock).mockResolvedValue({
+        statusCode: 200,
+        body: {
+          data: [
+            {id: 'inactive', name: 'WellbeingBreak', active: false, isSystemCode: true},
+            {id: 'lookalike', name: 'wellbeingbreak', active: true, isSystemCode: true},
+          ],
+          meta: {totalPages: 1},
+        },
+      });
+
+      await expect(agentConfigService.getWellbeingBreakIdleCode(mockOrgId)).rejects.toThrow(
+        'WELLBEING_BREAK_IDLE_CODE_NOT_FOUND'
+      );
+    });
+  });
+
   describe('getAgentConfig', () => {
+    const mockTeamData = [
+      {id: 'team1', name: 'Support Team'},
+      {id: 'team2', name: 'Sales Team'},
+    ];
+
+    const mockOrgInfo = {
+      tenantId: 'tenant123',
+      timezone: 'GMT',
+      environment: 'produs1',
+    };
+
+    const mockSiteInfo = {
+      id: 'c6a5451f-5ba7-49a1-aee8-fbef70c19ece',
+      name: 'Site-1',
+      multimediaProfileId: 'c5888e6f-5661-4871-9936-cbcec7658d41',
+    };
+
+    const mockURLMapping = [
+      {key: 'ACQUEON_API_URL', url: 'https://api.example.com'},
+      {key: 'ACQUEON_CONSOLE_URL', url: 'https://console.example.com'},
+    ];
+
+    const mockAIFeatureFlags = {
+      data: [{realtimeTranscripts: {enable: true}}],
+    };
+
     beforeEach(() => {
       jest.clearAllMocks();
     });
@@ -724,7 +814,7 @@ describe('AgentConfigService', () => {
         agentProfileId: 'profile123',
         siteId: 'site789',
         dbId: 'db123',
-        defaultDialledNumber: '1234567890',
+        deafultDialledNumber: '1234567890',
         id: 'user001',
         teamIds: ['team1', 'team2'],
       };
@@ -770,12 +860,6 @@ describe('AgentConfigService', () => {
         maskSensitiveData: false,
       };
 
-      const mockSiteInfo = {
-        id: 'c6a5451f-5ba7-49a1-aee8-fbef70c19ece',
-        name: 'Site-1',
-        multimediaProfileId: 'c5888e6f-5661-4871-9936-cbcec7658d41',
-      };
-
       const mockTenantData = {
         timeoutDesktopInactivityEnabled: false,
         timeoutDesktopInactivityMins: 15,
@@ -788,11 +872,6 @@ describe('AgentConfigService', () => {
         endConsultEnabled: true,
         callVariablesSuppressed: false,
       };
-
-      const mockURLMapping = [
-        {key: 'ACQUEON_API_URL', url: 'https://api.example.com'},
-        {key: 'ACQUEON_CONSOLE_URL', url: 'https://console.example.com'},
-      ];
 
       const mockAuxCodes = [
         {id: 'aux1', type: 'WRAP_UP_CODE', name: 'Wrap Up Code 1', isDefault: true},
@@ -864,7 +943,7 @@ describe('AgentConfigService', () => {
         skillProfileId: 'skillProfile456',
         siteId: 'site789',
         dbId: 'db123',
-        defaultDialledNumber: '1234567890',
+        deafultDialledNumber: '1234567890',
         id: 'user001',
         teamIds: ['team1', 'team2'],
       };
@@ -915,12 +994,6 @@ describe('AgentConfigService', () => {
         maskSensitiveData: true,
       };
 
-      const mockSiteInfo = {
-        id: 'c6a5451f-5ba7-49a1-aee8-fbef70c19ece',
-        name: 'Site-1',
-        multimediaProfileId: 'c5888e6f-5661-4871-9936-cbcec7658d41',
-      };
-
       const mockTenantData = {
         timeoutDesktopInactivityEnabled: true,
         timeoutDesktopInactivityMins: 15,
@@ -934,11 +1007,6 @@ describe('AgentConfigService', () => {
         callVariablesSuppressed: false,
         lostConnectionRecoveryTimeout: 30,
       };
-
-      const mockURLMapping = [
-        {key: 'ACQUEON_API_URL', url: 'https://api.example.com'},
-        {key: 'ACQUEON_CONSOLE_URL', url: 'https://console.example.com'},
-      ];
 
       const mockAuxCodes = [
         {id: 'aux1', type: 'WRAP_UP_CODE', name: 'Wrap Up Code 1'},
