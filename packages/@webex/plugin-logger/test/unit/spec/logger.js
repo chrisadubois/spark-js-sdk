@@ -1529,4 +1529,283 @@ describe('plugin-logger', () => {
       assert.equal(webex.logger.buffer.nextIndex, 0);
     });
   });
+  describe('transports', () => {
+    const makeTransport = (name = 'otlp') => {
+      const batches = [];
+      const transport = {
+        name,
+        export: sinon.spy((records) => {
+          batches.push(records);
+
+          return Promise.resolve();
+        }),
+      };
+
+      return {transport, batches};
+    };
+
+    beforeEach(() => {
+      webex.config.logger.separateLogBuffers = true;
+    });
+
+    it('keeps formatLogs() output unchanged when metadata is attached', () => {
+      webex.logger.client_info('plain', {a: 1});
+      webex.logger.client_logWithMetadata('info', {eventName: 'test.event', attributes: {k: 'v'}}, 'plain', {a: 1});
+
+      const [first, second] = webex.logger.clientBuffer.buffer;
+
+      assert.deepEqual(first.slice(2), second.slice(2));
+      assert.notInclude(webex.logger.formatLogs(), 'test.event');
+      assert.equal(second.meta.eventName, 'test.event');
+    });
+
+    it('assigns one increasing sequence across both buffers and exports in that order', async () => {
+      const {transport, batches} = makeTransport();
+
+      webex.logger.info('sdk one');
+      webex.logger.client_info('client one');
+      webex.logger.info('sdk two');
+      webex.logger.configureTransports([transport]);
+
+      const result = await webex.logger.flushTransport('otlp', {maxBytes: 1e6});
+
+      assert.deepEqual(
+        batches[0].map((record) => record.seq),
+        [1, 2, 3]
+      );
+      assert.deepEqual(
+        batches[0].map((record) => record.source),
+        ['sdk', 'client', 'sdk']
+      );
+      assert.deepEqual(result, {exported: 3, remaining: 0, dropped: 0});
+    });
+
+    it('builds records whose body is the formatLogs() line', async () => {
+      const {transport, batches} = makeTransport();
+
+      webex.logger.client_warn('warned', {user: 'someone@example.com'});
+      webex.logger.client_logToBuffer('buffered only');
+      webex.logger.configureTransports([transport]);
+      await webex.logger.flushTransport('otlp', {maxBytes: 1e6});
+
+      const lines = webex.logger.formatLogs().split('\n');
+      const [warned, buffered] = batches[0];
+
+      assert.equal(warned.body, lines[0]);
+      assert.equal(warned.level, 'warn');
+      assert.equal(warned.timestamp, Date.parse(webex.logger.clientBuffer.buffer[0][1]));
+      assert.notInclude(warned.body, 'someone@example.com');
+      assert.equal(buffered.level, 'info');
+      assert.equal(buffered.body, lines[1]);
+    });
+
+    it('keeps only scalar metadata attributes and filters strings', async () => {
+      const {transport, batches} = makeTransport();
+
+      webex.logger.client_logWithMetadata(
+        'nope',
+        {
+          eventName: 'e',
+          attributes: {
+            email: 'a@example.com',
+            count: 2,
+            ok: true,
+            bad: {},
+            nan: NaN,
+            Authorization: 'Bearer secret',
+          },
+        },
+        'msg'
+      );
+      webex.logger.configureTransports([transport]);
+      await webex.logger.flushTransport('otlp', {maxBytes: 1e6});
+
+      const [record] = batches[0];
+
+      assert.equal(record.level, 'info');
+      assert.equal(record.eventName, 'e');
+      assert.deepEqual(record.attributes, {email: '[REDACTED]', count: 2, ok: true});
+    });
+
+    it('stops at the byte budget but always takes one record', async () => {
+      const {transport, batches} = makeTransport();
+
+      webex.logger.client_info('x'.repeat(500));
+      webex.logger.client_info('y');
+      webex.logger.configureTransports([transport]);
+
+      const first = await webex.logger.flushTransport('otlp', {maxBytes: 100});
+      const second = await webex.logger.flushTransport('otlp', {maxBytes: 100});
+
+      assert.equal(batches[0].length, 1);
+      assert.deepEqual(first, {exported: 1, remaining: 1, dropped: 0});
+      assert.deepEqual(second, {exported: 1, remaining: 0, dropped: 0});
+    });
+
+    it('advances the cursor only when the export resolves', async () => {
+      const {transport} = makeTransport();
+
+      transport.export = sinon.stub();
+      transport.export.onFirstCall().rejects(new Error('boom'));
+      transport.export.onSecondCall().resolves();
+      webex.logger.client_info('retry me');
+      webex.logger.configureTransports([transport]);
+
+      await assert.isRejected(webex.logger.flushTransport('otlp', {maxBytes: 1e6}));
+      const result = await webex.logger.flushTransport('otlp', {maxBytes: 1e6});
+
+      assert.equal(transport.export.secondCall.args[0][0].seq, transport.export.firstCall.args[0][0].seq);
+      assert.deepEqual(result, {exported: 1, remaining: 0, dropped: 0});
+    });
+
+    it('shares one in-flight flush between concurrent callers', async () => {
+      const {transport} = makeTransport();
+
+      webex.logger.client_info('once');
+      webex.logger.configureTransports([transport]);
+
+      const first = webex.logger.flushTransport('otlp', {maxBytes: 1e6});
+      const second = webex.logger.flushTransport('otlp', {maxBytes: 1e6});
+
+      assert.strictEqual(first, second);
+      await first;
+      assert.calledOnce(transport.export);
+    });
+
+    it('reports entries evicted before export as dropped', async () => {
+      const {transport, batches} = makeTransport();
+
+      webex.config.logger.historyLength = 2;
+      webex.logger.configureTransports([transport]);
+      webex.logger.client_info('a');
+      webex.logger.client_info('b');
+      webex.logger.client_info('c');
+      webex.logger.client_info('d');
+
+      const result = await webex.logger.flushTransport('otlp', {maxBytes: 1e6});
+
+      assert.deepEqual(result, {exported: 2, remaining: 0, dropped: 2});
+      assert.deepEqual(
+        batches[0].map((record) => record.seq),
+        [3, 4]
+      );
+    });
+
+    it('keeps the cursor correct when eviction runs during an export', async () => {
+      let release;
+      const {transport} = makeTransport();
+
+      transport.export = sinon.spy(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          })
+      );
+      webex.config.logger.historyLength = 2;
+      webex.logger.client_info('a');
+      webex.logger.client_info('b');
+      webex.logger.configureTransports([transport]);
+
+      const pending = webex.logger.flushTransport('otlp', {maxBytes: 1e6});
+
+      webex.logger.client_info('c');
+      release();
+
+      // 'c' was appended during the export: new work, not backlog
+      assert.deepEqual(await pending, {exported: 2, remaining: 0, dropped: 0});
+
+      const next = webex.logger.flushTransport('otlp', {maxBytes: 1e6});
+
+      release();
+      assert.deepEqual(await next, {exported: 1, remaining: 0, dropped: 0});
+      assert.equal(transport.export.secondCall.args[0][0].body.endsWith('c'), true);
+    });
+
+    it('reads the single buffer when separateLogBuffers is off', async () => {
+      const {transport, batches} = makeTransport();
+
+      webex.config.logger.separateLogBuffers = false;
+      webex.logger.info('sdk');
+      webex.logger.client_info('client');
+      webex.logger.configureTransports([transport]);
+      await webex.logger.flushTransport('otlp', {maxBytes: 1e6});
+
+      assert.deepEqual(
+        batches[0].map((record) => record.source),
+        ['sdk', 'client']
+      );
+    });
+
+    it('redacts the event name like logged strings', async () => {
+      const {transport, batches} = makeTransport();
+
+      webex.logger.client_logWithMetadata('info', {eventName: 'user someone@example.com'}, 'msg');
+      webex.logger.configureTransports([transport]);
+      await webex.logger.flushTransport('otlp', {maxBytes: 1e6});
+
+      assert.equal(batches[0][0].eventName, 'user [REDACTED]');
+    });
+
+    it('keeps progress when a transport is registered again', async () => {
+      const {transport, batches} = makeTransport();
+
+      webex.logger.client_info('one');
+      webex.logger.configureTransports([transport]);
+      await webex.logger.flushTransport('otlp', {maxBytes: 1e6});
+      webex.logger.client_info('two');
+      webex.logger.configureTransports([transport]);
+      await webex.logger.flushTransport('otlp', {maxBytes: 1e6});
+
+      assert.equal(batches[1].length, 1);
+      assert.isTrue(batches[1][0].body.endsWith('two'));
+    });
+
+    it('reports drops on the next successful export after a failure', async () => {
+      const {transport} = makeTransport();
+
+      transport.export = sinon.stub();
+      transport.export.onFirstCall().rejects(new Error('boom'));
+      transport.export.onSecondCall().resolves();
+      webex.config.logger.historyLength = 2;
+      webex.logger.configureTransports([transport]);
+      webex.logger.client_info('a');
+      webex.logger.client_info('b');
+      webex.logger.client_info('c');
+
+      await assert.isRejected(webex.logger.flushTransport('otlp', {maxBytes: 1e6}));
+      assert.deepEqual(await webex.logger.flushTransport('otlp', {maxBytes: 1e6}), {
+        exported: 2,
+        remaining: 0,
+        dropped: 1,
+      });
+    });
+
+    it('rejects unknown transports', async () => {
+      await assert.isRejected(webex.logger.flushTransport('missing'));
+    });
+
+    it('assigns sequence in buffer order when printing re-enters the logger', async () => {
+      const {transport, batches} = makeTransport();
+
+      // production wraps console.* so every print also writes to the client buffer
+      console.error.restore();
+      sinon.stub(console, 'error').callsFake((...args) => {
+        webex.logger.client_logToBuffer(`console error: ${args.join(' ')}`);
+      });
+      webex.config.logger.clientLevel = 'error';
+      webex.logger.client_error('outer');
+      webex.logger.configureTransports([transport]);
+      await webex.logger.flushTransport('otlp', {maxBytes: 1e6});
+
+      const bodies = batches[0].map((record) => record.body);
+
+      assert.deepEqual(
+        batches[0].map((record) => record.seq),
+        [1, 2]
+      );
+      assert.include(bodies[0], 'console error');
+      assert.include(bodies[1], 'outer');
+      assert.deepEqual(bodies, webex.logger.formatLogs().split('\n'));
+    });
+  });
 });

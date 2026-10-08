@@ -6,6 +6,8 @@ import {inBrowser, patterns} from '@webex/common';
 import {WebexPlugin} from '@webex/webex-core';
 import {cloneDeep, has, isArray, isObject, isString} from 'lodash';
 
+import {exportNextBatch, getTransportState} from './transports';
+
 const precedence = {
   silent: 0,
   group: 1,
@@ -77,6 +79,51 @@ function walkAndFilter(object, visited = []) {
   }
 
   return object;
+}
+
+/**
+ * Keeps only a string eventName and scalar attributes; string attribute values go
+ * through the same filtering as logged strings.
+ * @param {Object} metadata
+ * @private
+ * @returns {Object|undefined}
+ */
+function sanitizeMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object') {
+    return undefined;
+  }
+
+  // same filtering as logged objects: authorization keys removed, emails and MTIDs redacted
+  const filtered = walkAndFilter(
+    cloneDeep({eventName: metadata.eventName, attributes: metadata.attributes})
+  );
+  const result = {};
+
+  if (typeof filtered.eventName === 'string' && filtered.eventName) {
+    result.eventName = filtered.eventName;
+  }
+  if (filtered.attributes && typeof filtered.attributes === 'object') {
+    const attributes = {};
+
+    Object.keys(filtered.attributes).forEach((key) => {
+      const value = filtered.attributes[key];
+
+      if (typeof value === 'string') {
+        attributes[key] = value;
+      } else if (
+        typeof value === 'boolean' ||
+        (typeof value === 'number' && Number.isFinite(value))
+      ) {
+        attributes[key] = value;
+      }
+    });
+
+    if (Object.keys(attributes).length) {
+      result.attributes = attributes;
+    }
+  }
+
+  return Object.keys(result).length ? result : undefined;
 }
 
 /**
@@ -353,6 +400,63 @@ const Logger = WebexPlugin.extend({
       this.buffer.nextIndex = this.buffer.lastSubmitted;
     }
   },
+
+  /**
+   * Registers optional external log transports. Each new transport reads the retained
+   * buffers through its own cursor, starting at the oldest retained entry; a name that
+   * is already registered keeps its cursor. Legacy formatting and upload are unaffected.
+   *
+   * @param {Array<LogTransport>} transports
+   * @returns {void}
+   */
+  configureTransports(transports = []) {
+    const state = getTransportState(this);
+    const cursors = {
+      sdk: this.sdkBuffer.evictedCount || 0,
+      client: this.clientBuffer.evictedCount || 0,
+      single: this.buffer.evictedCount || 0,
+    };
+
+    state.transports = new Map(
+      transports.map((transport) => {
+        const existing = state.transports.get(transport.name);
+
+        // a transport registered again keeps its progress and any in-flight flush
+        if (existing) {
+          existing.transport = transport;
+
+          return [transport.name, existing];
+        }
+
+        return [transport.name, {transport, cursors: {...cursors}, inFlight: null, dropped: 0}];
+      })
+    );
+  },
+
+  /**
+   * Exports the next ordered batch of retained entries to one transport. Only one
+   * flush per transport runs at a time; concurrent callers share it.
+   *
+   * @param {string} name transport name
+   * @param {Object} [options]
+   * @param {number} [options.maxBytes] estimated batch size budget; one record is always included
+   * @param {number} [options.maxRecords]
+   * @returns {Promise<FlushTransportResult>}
+   */
+  flushTransport(name, options = {}) {
+    const registration = getTransportState(this).transports.get(name);
+
+    if (!registration) {
+      return Promise.reject(new Error(`Logger: no transport named "${name}"`));
+    }
+    if (!registration.inFlight) {
+      registration.inFlight = exportNextBatch(this, registration, options).finally(() => {
+        registration.inFlight = null;
+      });
+    }
+
+    return registration.inFlight;
+  },
 });
 
 /**
@@ -364,16 +468,26 @@ const Logger = WebexPlugin.extend({
  * @param {string} type type of log, SDK or client
  * @param {bool} neverPrint function never prints to console
  * @param {bool} alwaysBuffer function always logs to log buffer
+ * @param {bool} withMetadata the method takes transport metadata as its first argument
  * @instance
  * @memberof Logger
  * @private
  * @memberof Logger
  * @returns {function} logger method with specified params
  */
-function makeLoggerMethod(level, impl, type, neverPrint = false, alwaysBuffer = false) {
+function makeLoggerMethod(
+  level,
+  impl,
+  type,
+  neverPrint = false,
+  alwaysBuffer = false,
+  withMetadata = false
+) {
   // Much of the complexity in the following function is due to a test-mode-only
   // helper
-  return function wrappedConsoleMethod(...args) {
+  return function wrappedConsoleMethod(...callArgs) {
+    const metadata = withMetadata ? sanitizeMetadata(callArgs[0]) : undefined;
+    const args = withMetadata ? callArgs.slice(1) : callArgs;
     // it would be easier to just pass in the name and buffer here, but the config isn't completely initialized
     // in Ampersand, even if the initialize method is used to set this up.  so we keep the type to achieve
     // a sort of late binding to allow retrieving a name from config.
@@ -454,12 +568,25 @@ function makeLoggerMethod(level, impl, type, neverPrint = false, alwaysBuffer = 
 
         stringified.unshift(logDate.toISOString());
         stringified.unshift('|  '.repeat(this.groupLevel));
+
+        // transport metadata; Array#join ignores these properties, so formatLogs() output is unchanged
+        const transportState = getTransportState(this);
+
+        transportState.sequence += 1;
+        stringified.seq = transportState.sequence;
+        stringified.level = level || 'info';
+        stringified.source = logType;
+        if (metadata) {
+          stringified.meta = metadata;
+        }
+
         bufferRef.buffer.push(stringified);
         if (bufferRef.buffer.length > historyLength) {
           // we've gone over the buffer limit, trim it down
           const deleteCount = bufferRef.buffer.length - historyLength;
 
           bufferRef.buffer.splice(0, deleteCount);
+          bufferRef.evictedCount = (bufferRef.evictedCount || 0) + deleteCount;
 
           // and adjust the corresponding buffer index used for log diff uploads
           bufferRef.nextIndex -= deleteCount;
@@ -485,6 +612,8 @@ function makeLoggerMethod(level, impl, type, neverPrint = false, alwaysBuffer = 
   };
 }
 
+const clientMetadataMethods = {};
+
 levels.forEach((level) => {
   let impls = fallbacks[level];
   let impl = level;
@@ -500,6 +629,14 @@ levels.forEach((level) => {
   // eslint-disable-next-line complexity
   Logger.prototype[`client_${level}`] = makeLoggerMethod(level, impl, LOG_TYPES.CLIENT);
   Logger.prototype[level] = makeLoggerMethod(level, impl, LOG_TYPES.SDK);
+  clientMetadataMethods[level] = makeLoggerMethod(
+    level,
+    impl,
+    LOG_TYPES.CLIENT,
+    false,
+    false,
+    true
+  );
 });
 
 Logger.prototype.client_logToBuffer = makeLoggerMethod(
@@ -516,5 +653,19 @@ Logger.prototype.logToBuffer = makeLoggerMethod(
   true,
   true
 );
+
+/**
+ * Logs exactly like `client_<level>()` and attaches an event name and scalar
+ * attributes for transports. The metadata never changes the formatted text.
+ *
+ * @param {string} level a logger level; unknown levels log as info
+ * @param {{eventName: string, attributes: Object<string, string|number|boolean>}} metadata
+ * @param {...*} args
+ * @memberof Logger
+ * @returns {void}
+ */
+Logger.prototype.client_logWithMetadata = function clientLogWithMetadata(level, metadata, ...args) {
+  (clientMetadataMethods[level] || clientMetadataMethods.info).call(this, metadata, ...args);
+};
 
 export default Logger;
